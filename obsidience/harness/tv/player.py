@@ -93,6 +93,38 @@ def available():
     return state() is not None
 
 
+def mirror(surface: str, cancel=None, limit=START_LIMIT):
+    """Select once, then only read until the owned picture and audio advance."""
+    if surface != 'usb-c':
+        raise ValueError('TV mirroring supports only surface usb-c with Microsoft Edge audio')
+    tuner = _ask({'op': 'mirror', 'surface': surface}, VOD_LIMIT, cancel)
+    deadline = time.monotonic() + limit
+    while True:
+        selected = tuner.get('mirror') or {}
+        if selected.get('surface') != surface or selected.get('audio') != 'Microsoft Edge':
+            raise ValueError('The TV mirror selection changed; do not replay it')
+        if selected.get('status') == 'active':
+            return tuner
+        if selected.get('status') == 'failed':
+            raise ValueError(selected.get('error') or 'The TV mirror failed')
+        if time.monotonic() >= deadline:
+            raise TimeoutError('The TV mirror has not verified advancing picture and audio; do not replay it')
+        if cancel is not None:
+            if cancel.wait(.25):
+                raise InterruptedError('TV mirror verification cancelled')
+        else:
+            time.sleep(.25)
+        tuner = _ask({'op': 'state'}, cancel=cancel)
+
+
+def stop_mirror(cancel=None):
+    """Clear the selected mirror once; the tuner acknowledges owned-process teardown."""
+    tuner = _ask({'op': 'stop'}, VOD_LIMIT, cancel)
+    if tuner.get('mirror') is not None or tuner.get('playback') != 'idle':
+        raise ValueError('The TV mirror did not read back stopped')
+    return tuner
+
+
 def play(source, title, cancel=None, limit=START_LIMIT):
     """Play one source in place of whatever plays; True once the player shows it.
 

@@ -13,9 +13,9 @@
   mode client     make the television's Moonlight ask for the current mode's stream size
   mode status     print the current mode
 
-GameMode keeps a game off a shared card: ~/.config/gamemode.ini starts
-obsidience-tv-mode@1080p when a game registers and obsidience-tv-mode@default when the last
-one exits (owner, 2026-10-12: the TV drops to the integrated GPU during gaming).
+GameMode's profile calls gaming-start/gaming-end to move the TV to the integrated
+GPU during gaming and restore its previous mode afterwards. An off TV stays off;
+an explicit mode selection supersedes the temporary gaming selection.
 
 The GPU is chosen when the session, player, tuner and Sunshine start. The units read
 modes/default.env and then $XDG_RUNTIME_DIR/obsidience-tv/mode.env, a link to the selected
@@ -49,6 +49,7 @@ from pathlib import Path
 HOST = Path(__file__).resolve().parent
 RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}') / 'obsidience-tv'
 LINK = RUNTIME / 'mode.env'
+GAMING_STATE = RUNTIME / 'gaming-mode.json'
 SESSION = 'obsidience-tv-session.service'
 UNITS = (SESSION, 'obsidience-tv-player.service', 'obsidience-tv-tuner.service', 'obsidience-tv-sunshine.service')
 TELEVISION = HOST.parents[1] / 'state' / 'television.json'
@@ -240,15 +241,16 @@ def listening():
         return False
 
 
-def switch(mode, reload=False):
+def switch(mode, reload=False, preserve_off=False):
     before = current()
     if before == mode and not reload:
         say(f'TV mode is already {mode}')
         return
-    playing = tuner({'op': 'state'})
+    was_active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet', SESSION]).returncode == 0
+    playing = tuner({'op': 'state'}) if was_active else None
     try:
-        tv = Television()
-        showing = (tv.front() or '').startswith(MOONLIGHT + '/')
+        tv = Television() if was_active else None
+        showing = bool(tv) and (tv.front() or '').startswith(MOONLIGHT + '/')
     except (OSError, ValueError, KeyError):
         tv, showing = None, False
     say(f'TV mode {before} -> {mode}')
@@ -260,6 +262,9 @@ def switch(mode, reload=False):
         temp.unlink(missing_ok=True)
         temp.symlink_to(HOST / 'modes' / f'{mode}.env')
         temp.replace(LINK)
+    if preserve_off and not was_active:
+        say('TV remains off')
+        return
     subprocess.run(['systemctl', '--user', 'restart', SESSION], check=True, timeout=60)
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
@@ -286,13 +291,29 @@ def main():
     if op == 'status':
         say(current())
         return
-    if op not in (*MODES, 'default', 'reload', 'client'):
+    if op not in (*MODES, 'default', 'reload', 'client', 'gaming-start', 'gaming-end'):
         raise SystemExit(__doc__)
     RUNTIME.mkdir(mode=0o700, exist_ok=True)
     with open(RUNTIME / 'mode.lock', 'w') as lock:  # One switch at a time; a second waits its turn.
         fcntl.flock(lock, fcntl.LOCK_EX)
         if op == 'client':
             sys.exit(0 if client(Television(), restart=False) else 1)
+        if op == 'gaming-start':
+            if not GAMING_STATE.exists():
+                temporary = GAMING_STATE.with_suffix('.new')
+                temporary.write_text(json.dumps({'previous': current()}) + '\n')
+                temporary.replace(GAMING_STATE)
+            switch('1080p', preserve_off=True)
+            return
+        if op == 'gaming-end':
+            if GAMING_STATE.exists():
+                previous = json.loads(GAMING_STATE.read_text()).get('previous')
+                if current() == '1080p' and previous in MODES:
+                    switch(previous, preserve_off=True)
+                GAMING_STATE.unlink()
+            return
+        if op in (*MODES, 'default'):
+            GAMING_STATE.unlink(missing_ok=True)
         switch({'reload': current(), 'default': default()}.get(op, op), reload=op == 'reload')
 
 

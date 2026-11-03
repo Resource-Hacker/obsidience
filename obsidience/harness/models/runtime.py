@@ -14,6 +14,7 @@ import hashlib
 import itertools
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -179,6 +180,19 @@ class ModelMemoryUnavailable(ModelResourceUnavailable):
                 "memory": self.memory, "detail": self.detail}
 
 
+class ModelSlotsResizing(ModelResourceUnavailable):
+    """The model server is relaunching with a new slot count for the lanes now running."""
+
+    def __init__(self, spec: ModelSpec, count: int) -> None:
+        super().__init__(spec, [], {})
+        self.count = count
+        self.args = (f"{spec.label} is restarting with {count} slots for the agents now running; "
+                     "back in about two minutes",)
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "code": "model_slots_resizing", "slots": self.count}
+
+
 MODELS = {
     EXECUTIVE_MODEL: ModelSpec(
         id=EXECUTIVE_MODEL,
@@ -200,8 +214,9 @@ MODELS = {
         # (Q6_K 3.10). Keep both cards: single-card MTP exhausted VRAM beside ASR (2026-10-18).
         min_gpu_count=2,
         default_gpu_memory_utilization=0.90,
-        # One llama.cpp slot per caller (EXECUTIVE_SLOT, BARD_SLOT, TASK_SLOT).
-        default_max_num_seqs=3,
+        # One llama.cpp slot per running lane (slot leases below); the Harness rewrites this
+        # profile value whenever the lane count changes: Executive and background Tasks.
+        default_max_num_seqs=2,
         service=GEMMA_SERVICE,
         model_path=GEMMA_MODEL,
         verified_path=GEMMA_MODEL.with_suffix(".gguf.verified"),
@@ -364,21 +379,128 @@ def _write_launch(spec: ModelSpec, devices: tuple[str, ...], profile: dict) -> N
     temporary.replace(path)
 
 
-# llama.cpp slots (2026-10-19): the Executive conversation, Bard and background work
-# (Tasks, instruction trials, Harness2 sessions, the memory route, benchmarks) each keep
-# their own prompt cache; one shared slot let an Audit trial swap the Executive out to
-# --cache-ram (~0.3 s each way) or evict it. Fewer served slots fold the later callers
-# onto the last one; a one-slot launch sends no id_slot (engine selection, as before).
-EXECUTIVE_SLOT, BARD_SLOT, TASK_SLOT = 0, 1, 2
+# The Executive conversation and background Tasks keep independent leased prompt caches.
+EXECUTIVE_LANE, TASK_LANE = "executive", "task"
+BASE_LANES = (EXECUTIVE_LANE, TASK_LANE)
+MODEL_SLOT_LEASES = MODEL_SLOT_DIR / "leases.json"
+# Without --kv-unified every slot gets the full context: 65536 tokens cost 840 MiB per slot on
+# each RTX 4000 under tensor split (5 full-attention layers x 2 KV heads x 1024 dims x f16 =
+# 20 KiB/token, plus the 2048-cell SWA ring at 200 KiB/cell, halved per card; the MTP head shares
+# the target's KV). At five slots both cards had 5.7-6.2 GiB free, so nine slots leave >= 2.3 GiB
+# on each; lanes beyond this run unpinned (the engine's own slot choice).
+MAX_SLOTS = 9
 
 
-def slot_fields(spec: ModelSpec, slot: int) -> dict:
-    """The request field pinning a caller to its slot of the served launch, if it has several."""
+def _saved_lane(lane: str) -> bool:
+    """Lanes whose prompt cache is saved with the engine and restored into a fresh one.
+
+    The Executive conversation is saved; background Task caches are disposable.
+    """
+    return lane == EXECUTIVE_LANE
+
+
+def _served_slots(spec: ModelSpec) -> int:
+    """max_num_seqs of the launch record llm.sh reads (0 without one)."""
     try:
-        slots = int(json.loads(_launch_path(spec.id).read_text()).get("max_num_seqs", 1))
+        return int(json.loads(_launch_path(spec.id).read_text()).get("max_num_seqs", 1))
     except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+class _SlotLeases:
+    """Which lane holds which slot; persisted atomically in MODEL_SLOT_LEASES.
+
+    A lease may carry a hand-off file: the leased slot is written there and the
+    file removed on release, so an external client pins exactly its leased slot.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.slots: dict[str, int] = {}
+        self.handoffs: dict[str, str] = {}
+        # Slots lanes held before (a previous Harness, an earlier lease): reused when free so
+        # a surviving engine's caches and a running controller's slot stay aligned.
+        self.previous: dict[str, int] = {}
+
+    def clear_stale(self) -> dict[str, str]:
+        """Drop the previous Harness's leases; return its hand-off lanes whose file still exists."""
+        try:
+            raw = json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            raw = {}
+        rows = raw.get("leases") if isinstance(raw, dict) else None
+        kept = {}
+        for lane, row in (rows.items() if isinstance(rows, dict) else ()):
+            if isinstance(lane, str) and isinstance(row, dict) and type(row.get("slot")) is int:
+                self.previous[lane] = row["slot"]
+                handoff = row.get("handoff")
+                if isinstance(handoff, str) and Path(handoff).is_file():
+                    kept[lane] = handoff
+        if rows:
+            print(f"[models] slot leases cleared at start: pid {raw.get('pid')} held "
+                  f"{json.dumps({lane: self.previous.get(lane) for lane in rows})}")
+        self.slots, self.handoffs = {}, {}
+        self._write(0)
+        return kept
+
+    def assign(self, wanted: dict[str, str | None], count: int) -> None:
+        """Lease each wanted lane a slot below ``count``; a held slot is kept when it fits."""
+        lanes = list(wanted)[:count]
+        leases = {lane: slot for lane, slot in self.slots.items() if lane in lanes and slot < count}
+        taken = set(leases.values())
+        for lane in lanes:
+            if lane in leases:
+                continue
+            slot = self.previous.get(lane)
+            if slot is None or slot >= count or slot in taken:
+                slot = min(set(range(count)) - taken)
+            leases[lane] = slot
+            taken.add(slot)
+        for lane in sorted(set(self.slots) - set(leases)):
+            self.previous[lane] = self.slots[lane]
+            print(f"[models] slot lease released: {lane} slot {self.slots[lane]}")
+        for lane, slot in leases.items():
+            if self.slots.get(lane) != slot:
+                print(f"[models] slot lease granted: {lane} slot {slot} of {count}")
+        handoffs = {lane: wanted[lane] for lane in leases if wanted.get(lane)}
+        for lane, path in self.handoffs.items():
+            if lane not in handoffs or handoffs[lane] != path:
+                with contextlib.suppress(OSError):
+                    Path(path).unlink(missing_ok=True)
+        for lane, path in handoffs.items():
+            if self.slots.get(lane) != leases[lane] or self.handoffs.get(lane) != path:
+                try:
+                    _atomic_json(Path(path), {"lane": lane, "slot": leases[lane], "served": count,
+                                              "pid": os.getpid()})
+                except OSError as exc:
+                    print(f"[models] slot hand-off for {lane} not written: {exc!r}")
+        self.slots, self.handoffs = leases, handoffs
+        self._write(count)
+
+    def saved_lanes(self) -> list[str]:
+        return [lane for lane in self.slots if _saved_lane(lane)]
+
+    def _write(self, count: int) -> None:
+        _atomic_json(self.path, {
+            "pid": os.getpid(), "served": count,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "leases": {lane: {"slot": slot, **({"handoff": self.handoffs[lane]} if lane in self.handoffs else {})}
+                       for lane, slot in sorted(self.slots.items(), key=lambda item: item[1])},
+        })
+
+
+LEASES = _SlotLeases(MODEL_SLOT_LEASES)
+
+
+def slot_fields(spec: ModelSpec, lane: str) -> dict:
+    """The request field pinning a lane to its leased slot of the served launch, if it has several.
+
+    A lane without a lease (beyond MAX_SLOTS) is unpinned: the engine chooses.
+    """
+    if _served_slots(spec) <= 1:
         return {}
-    return {"id_slot": min(slot, slots - 1)} if slots > 1 else {}
+    slot = LEASES.slots.get(lane)
+    return {} if slot is None else {"id_slot": slot}
 
 
 def _read_launch(model_id: str) -> tuple[str, ...]:
@@ -511,21 +633,40 @@ async def _probe(spec: ModelSpec, timeout: float = 0.75) -> bool:
     return await asyncio.to_thread(_healthy, spec, timeout)
 
 
-def _slot_file(spec: ModelSpec) -> str | None:
-    """Slot file name for this exact model, MTP head, launch profile and llm.sh."""
+def _slot_file(spec: ModelSpec, lane: str = EXECUTIVE_LANE) -> str | None:
+    """Slot file name for this exact model, MTP head, launch profile and llm.sh.
+
+    The Executive's lane keeps its unsuffixed name; the other saved lanes add ``-<lane>``, so a
+    cache follows its lane to whichever slot it leases. The slot count is left out of the
+    fingerprint: one sequence's state does not depend on it, and a relaunch for a new count
+    restores the caches its stop saved.
+    """
     if spec.id != EXECUTIVE_MODEL:
         return None
     try:
         digest = hashlib.sha256()
-        for path in (_launch_path(spec.id), _HardwareModelRuntime._memory_script(spec)):
-            digest.update(path.read_bytes())
+        launch = json.loads(_launch_path(spec.id).read_text())
+        launch.pop("max_num_seqs", None)
+        digest.update(json.dumps(launch, sort_keys=True).encode())
+        digest.update(_HardwareModelRuntime._memory_script(spec).read_bytes())
         for path in (spec.model_path, spec.mtp_path):
             if path:
                 stat = path.stat()
                 digest.update(f"{path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}".encode())
-    except OSError:
+    except (OSError, ValueError, AttributeError):
         return None
-    return f"{spec.id}-{digest.hexdigest()[:16]}.bin"
+    suffix = "" if lane == EXECUTIVE_LANE else "-" + _lane_tag(lane)
+    return f"{spec.id}-{digest.hexdigest()[:16]}{suffix}.bin"
+
+
+def _lane_tag(lane: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", lane.lower()).strip("-")
+
+
+def _lane_of(name: str) -> str:
+    """The lane tag a saved file belongs to ('' for the Executive's)."""
+    match = re.search(r"-[0-9a-f]{16}(?:-(.+))?\.bin$", name)
+    return (match.group(1) or "") if match else "?"
 
 
 async def _slot_request(spec: ModelSpec, method: str, query: str = "",
@@ -982,8 +1123,8 @@ async def _benchmark_text_sample(
         "stream": True,
         "stream_options": {"include_usage": True},
         "chat_template_kwargs": {"enable_thinking": False},
-        # Off the Executive's and Bard's slots, so their prompt caches stay warm.
-        **slot_fields(active, TASK_SLOT),
+        # Off the Executive's slot, so its prompt cache stays warm.
+        **slot_fields(active, TASK_LANE),
     }
     started = time.perf_counter()
     first_text_at: float | None = None
@@ -1063,11 +1204,21 @@ class _HardwareModelRuntime:
         self._memory_plan_lock = threading.RLock()
         self._memory_refresh_lock = asyncio.Lock()
         self._reservation_processes: dict[str, tuple[int, float]] = {}
-        # Model processes already checked for a slot restore since start, and the
-        # pending idle save after a standby warm with the last saved slot identity.
-        self._slot_checked: set[str] = set()
+        # (model, lane) pairs already checked for a slot restore since start, the
+        # pending idle save after a standby warm and each lane's last saved identity.
+        self._slot_checked: set[tuple[str, str]] = set()
         self._slot_save_task: asyncio.Task | None = None
-        self._slot_saved: tuple = (None, 0.0)
+        self._slot_saved: dict[str, tuple] = {}
+        # Slot leases: the running lanes (lane -> hand-off file or None), in lease order; the
+        # pending lane reconciliation; the slot count of a relaunch in progress (turns are
+        # refused meanwhile); and the model lifecycle subscribers.
+        self._lanes: dict[str, str | None] = dict.fromkeys(BASE_LANES)
+        self._lanes_open = False
+        self._lanes_dirty = False
+        self._lane_task: asyncio.Task | None = None
+        self.resizing: int | None = None
+        self._relaunch_quiet: set[str] = set()  # Background callers already logged this relaunch.
+        self._relaunch_notifier: Callable[[str, int, int], Awaitable[None]] | None = None
 
     @property
     def work_requested(self) -> bool:
@@ -1287,55 +1438,70 @@ class _HardwareModelRuntime:
         if not installed or not spec.service:
             raise RuntimeError(f"{spec.id} is not installed")
 
-    async def _restore_slot(self, spec: ModelSpec) -> None:
-        """Load the saved slot into an empty slot (a model process that served nothing yet)."""
-        if spec.id in self._slot_checked:
-            return
-        self._slot_checked.add(spec.id)
-        name = _slot_file(spec)
-        if name is None or not (MODEL_SLOT_DIR / name).is_file():
-            return
-        slots = await _slot_request(spec, "GET", timeout=5)
-        if not isinstance(slots, list) or not slots or slots[0].get("n_cached_tokens") != 0:
-            return
-        started = time.monotonic()
-        result = await _slot_request(spec, "POST", "/0?action=restore", {"filename": name})
-        if isinstance(result, dict):
-            print(f"[models] {spec.id} slot restored: {result.get('n_restored')} tokens "
-                  f"in {time.monotonic() - started:.2f} s")
+    async def _restore_slot(self, spec: ModelSpec, lane: str = EXECUTIVE_LANE) -> int | None:
+        """Load the lane's saved cache into its leased slot while empty (a fresh model process).
 
-    async def _save_slot(self, spec: ModelSpec, *, force: bool = False) -> None:
-        """Persist the slot unless it is unchanged or saved within the interval."""
-        name = _slot_file(spec)
-        if name is None or not await _probe(spec):
+        Returns the restored token count, or None when nothing was restored.
+        """
+        slot = LEASES.slots.get(lane)
+        if slot is None or (spec.id, lane) in self._slot_checked:
+            return None
+        self._slot_checked.add((spec.id, lane))
+        name = _slot_file(spec, lane)
+        if name is None or not (MODEL_SLOT_DIR / name).is_file():
+            return None
+        slots = await _slot_request(spec, "GET", timeout=5)
+        if not isinstance(slots, list) or len(slots) <= slot or slots[slot].get("n_cached_tokens") != 0:
+            return None
+        started = time.monotonic()
+        result = await _slot_request(spec, "POST", f"/{slot}?action=restore", {"filename": name})
+        if not isinstance(result, dict):
+            return None
+        print(f"[models] {spec.id} slot {slot} ({lane}) restored: {result.get('n_restored')} tokens "
+              f"in {time.monotonic() - started:.2f} s")
+        return int(result.get("n_restored") or 0)
+
+    async def _save_slot(self, spec: ModelSpec, lane: str = EXECUTIVE_LANE, *, force: bool = False) -> None:
+        """Persist the lane's slot unless it is unchanged or saved within the interval."""
+        slot = LEASES.slots.get(lane)
+        name = _slot_file(spec, lane)
+        if slot is None or name is None or not await _probe(spec):
             return
         slots = await _slot_request(spec, "GET", timeout=5)
-        if not isinstance(slots, list) or not slots or not slots[0].get("n_cached_tokens"):
+        if not isinstance(slots, list) or len(slots) <= slot or not slots[slot].get("n_cached_tokens"):
             return
-        identity = (name, slots[0]["n_cached_tokens"])
-        last, saved_at = self._slot_saved
+        identity = (name, slots[slot]["n_cached_tokens"])
+        last, saved_at = self._slot_saved.get(lane, (None, 0.0))
+        if last is None:
+            # A fresh Harness: the file on disk is the last save, so development
+            # restarts do not rewrite each slot's hundreds of MiB every time.
+            with contextlib.suppress(OSError):
+                age = max(0.0, time.time() - (MODEL_SLOT_DIR / name).stat().st_mtime)
+                saved_at = time.monotonic() - age
         if identity == last or (not force and time.monotonic() - saved_at < MODEL_SLOT_SAVE_INTERVAL):
             return
         MODEL_SLOT_DIR.mkdir(parents=True, exist_ok=True)
         partial = MODEL_SLOT_DIR / (name + ".tmp")
-        result = await _slot_request(spec, "POST", "/0?action=save",
+        result = await _slot_request(spec, "POST", f"/{slot}?action=save",
                                      {"filename": partial.name, "checkpoints": MODEL_SLOT_CHECKPOINTS})
         try:
             if not isinstance(result, dict):
                 partial.unlink(missing_ok=True)
                 # An engine without --slot-save-path retries only after the interval.
-                self._slot_saved = (last, time.monotonic())
+                self._slot_saved[lane] = (last, time.monotonic())
                 return
             partial.replace(MODEL_SLOT_DIR / name)
-            for old in MODEL_SLOT_DIR.glob(f"{spec.id}-*"):
-                if old.name != name:
+            for old in MODEL_SLOT_DIR.glob(f"{spec.id}-*.bin"):
+                # Older saves of this lane, and the per-slot files before slot leases.
+                if old.name != name and (_lane_of(old.name) == _lane_of(name)
+                                         or re.fullmatch(r"slot\d+", _lane_of(old.name))):
                     old.unlink(missing_ok=True)
         except OSError as exc:
             print(f"[models] {spec.id} slot file update failed: {exc!r}")
             return
-        self._slot_saved = (identity, time.monotonic())
+        self._slot_saved[lane] = (identity, time.monotonic())
         timings = result.get("timings") or {}
-        print(f"[models] {spec.id} slot saved: {result.get('n_saved')} tokens, "
+        print(f"[models] {spec.id} slot {slot} ({lane}) saved: {result.get('n_saved')} tokens, "
               f"{(result.get('n_written') or 0) / 2**20:.0f} MiB in {timings.get('save_ms', 0):.0f} ms")
 
     def _schedule_slot_save(self, spec: ModelSpec) -> None:
@@ -1350,7 +1516,8 @@ class _HardwareModelRuntime:
             if self.lock.locked() or self.work_requested:
                 return
             async with self.lock:
-                await self._save_slot(spec)
+                for lane in LEASES.saved_lanes():
+                    await self._save_slot(spec, lane)
 
         self._slot_save_task = asyncio.create_task(save_when_idle())
 
@@ -1358,9 +1525,10 @@ class _HardwareModelRuntime:
         if spec.service and (await _active(spec.service) or await _probe(spec)):
             self.residency_generation += 1
             with contextlib.suppress(Exception):
-                await self._save_slot(spec, force=True)
+                for lane in LEASES.saved_lanes():
+                    await self._save_slot(spec, lane, force=True)
             await _systemctl("stop", spec.service, timeout=120)
-            self._slot_checked.discard(spec.id)
+            self._slot_checked = {key for key in self._slot_checked if key[0] != spec.id}
         if await _probe(spec):
             raise RuntimeError(f"unmanaged {spec.id} process remained after stopping {spec.service}")
 
@@ -1384,8 +1552,9 @@ class _HardwareModelRuntime:
         _write_launch(spec, devices, profile)
         await _systemctl("start", spec.service, timeout=60)
         await self._wait_ready(spec, devices)
-        self._slot_checked.discard(spec.id)
-        await self._restore_slot(spec)
+        self._slot_checked = {key for key in self._slot_checked if key[0] != spec.id}
+        for lane in LEASES.saved_lanes():
+            await self._restore_slot(spec, lane)
 
     @staticmethod
     def _desired_models(settings: dict) -> dict[str, tuple[str, ...]]:
@@ -1527,7 +1696,7 @@ class _HardwareModelRuntime:
     @asynccontextmanager
     async def resident_prefill(self, spec: ModelSpec, *, load_if_idle: bool = False):
         """Borrow idle capacity; only explicit standby may restore its model."""
-        if self.lock.locked() or self.work_requested:
+        if self.lock.locked() or self.work_requested or self.resizing is not None:
             yield False
             return
         try:
@@ -1558,7 +1727,8 @@ class _HardwareModelRuntime:
                 finally:
                     self.switching = False
             if healthy:
-                await self._restore_slot(spec)
+                for lane in LEASES.saved_lanes():
+                    await self._restore_slot(spec, lane)
             yield healthy
             if healthy and load_if_idle:
                 self._schedule_slot_save(spec)
@@ -1575,6 +1745,8 @@ class _HardwareModelRuntime:
 
     @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
+        if self.resizing is not None and spec.id == EXECUTIVE_MODEL:
+            raise ModelSlotsResizing(spec, self.resizing)
         # Steady state: the reconciled default model already serves this lease.
         # One off-loop health probe replaces memory admission, device selection
         # and the per-model service scan; any change takes the complete path.
@@ -1650,7 +1822,129 @@ class _HardwareModelRuntime:
                     print(f"[models] default residency deferred: {exc}")
             finally:
                 self.switching = False
+            # A previous Harness's leases are stale; an external client holding a
+            # hand-off file keeps its lease. Use the served count now; open_lanes()
+            # applies the complete core lane set.
+            self._lanes.update(LEASES.clear_stale())
+            spec = MODELS[EXECUTIVE_MODEL]
+            LEASES.assign(self._lanes, _served_slots(spec) or len(self._lanes))
         return model_events
+
+    # Slot leases ---------------------------------------------------------
+    def want_lane(self, lane: str, handoff: str | None = None) -> None:
+        """A lane starts running: lease it a slot (relaunching for the new count if needed)."""
+        if lane in self._lanes and self._lanes[lane] == handoff:
+            return
+        self._lanes[lane] = handoff
+        self._schedule_lanes()
+
+    def drop_lane(self, lane: str) -> None:
+        """A lane stopped: release its slot (relaunching for the new count)."""
+        if lane in BASE_LANES or lane not in self._lanes:
+            return
+        del self._lanes[lane]
+        self._schedule_lanes()
+
+    def set_lanes(self, prefix: str, lanes: list[str]) -> None:
+        """Replace every running lane that starts with ``prefix`` by ``lanes``, keeping order."""
+        current = [lane for lane in self._lanes if lane.startswith(prefix)]
+        if current == list(lanes):
+            return
+        for lane in current:
+            if lane not in lanes:
+                del self._lanes[lane]
+        for lane in lanes:
+            self._lanes.setdefault(lane, None)
+        self._schedule_lanes()
+
+    def lanes(self, prefix: str = "") -> list[str]:
+        return [lane for lane in self._lanes if lane.startswith(prefix)]
+
+    def set_relaunch_notifier(self, notifier: Callable[[str, int, int], Awaitable[None]] | None) -> None:
+        """``notifier(phase, served, count)`` runs before ("before") and after ("after") a relaunch."""
+        self._relaunch_notifier = notifier
+
+    def open_lanes(self) -> None:
+        """Startup has added every running lane: apply the set (one relaunch at most)."""
+        self._lanes_open = True
+        self._schedule_lanes()
+
+    def _schedule_lanes(self) -> None:
+        self._lanes_dirty = True
+        if self._lanes_open and (self._lane_task is None or self._lane_task.done()):
+            self._lane_task = asyncio.get_running_loop().create_task(
+                self._apply_lanes_loop(), name="obsidience-model-slot-lanes")
+
+    async def _apply_lanes_loop(self) -> None:
+        # Changes during a relaunch only mark the set dirty: the next pass uses the final set.
+        while self._lanes_dirty:
+            self._lanes_dirty = False
+            try:
+                await self._apply_lanes()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                print(f"[models] slot lanes not applied: {exc!r}")
+
+    async def _notify_relaunch(self, phase: str, served: int, count: int) -> None:
+        if self._relaunch_notifier is not None:
+            try:
+                await asyncio.wait_for(self._relaunch_notifier(phase, served, count), 10)
+            except Exception as exc:
+                print(f"[models] slot relaunch {phase} notice failed: {exc!r}")
+
+    async def _apply_lanes(self) -> None:
+        spec = MODELS[EXECUTIVE_MODEL]
+        count = min(len(self._lanes), MAX_SLOTS)
+        served = _served_slots(spec)
+        released = [lane for lane in LEASES.saved_lanes() if lane not in self._lanes]
+        if released and await _probe(spec):
+            # A released lane's warm cache is saved while it still holds its slot.
+            async with self.lock:
+                for lane in released:
+                    with contextlib.suppress(Exception):
+                        await self._save_slot(spec, lane, force=True)
+        if count == served or not await _probe(spec):
+            # Same count (or no running server): the leases change, the engine does not.
+            if count != served:
+                settings = _read_settings()
+                settings["models"][spec.id]["max_num_seqs"] = count
+                _write_settings(settings)
+            LEASES.assign(self._lanes, served if count == served else count)
+            return
+        if len(self._lanes) > MAX_SLOTS:
+            print(f"[models] slot lanes beyond {MAX_SLOTS} run unpinned: {list(self._lanes)[MAX_SLOTS:]}")
+        # Refuse new turns from now; the relaunch waits for the work holding the engine.
+        self.resizing = count
+        self._relaunch_quiet.clear()
+        started = time.monotonic()
+        try:
+            async with self.lock:
+                count = min(len(self._lanes), MAX_SLOTS)
+                served = _served_slots(spec)
+                if count == served:
+                    # Events while waiting for the engine cancelled each other out.
+                    LEASES.assign(self._lanes, count)
+                    return
+                self.resizing = count
+                # After the active turn settles, before the outage.
+                await self._notify_relaunch("before", served, count)
+                self.switching = True
+                self.residency_generation += 1
+                print(f"[models] slot relaunch: {served} -> {count} slots for {list(self._lanes)}")
+                settings = _read_settings()
+                settings["models"][spec.id]["max_num_seqs"] = count
+                await self._stop(spec)  # saves each saved lane's cache under its current lease
+                _write_settings(settings)
+                LEASES.assign(self._lanes, count)
+                self.reconciliation_pending = True
+                await self._reconcile_defaults()  # starts the new launch and restores the leased caches
+                self.reconciliation_pending = False
+                print(f"[models] slot relaunch done: {count} slots in {time.monotonic() - started:.0f} s")
+        finally:
+            self.switching = False
+            self.resizing = None
+        await self._notify_relaunch("after", served, count)
 
     async def set_hardware(self, device: object, component: object) -> dict:
         device_id = str(device or "")
@@ -1888,6 +2182,8 @@ class _HardwareModelRuntime:
                 self.switching = False
 
     async def shutdown(self) -> None:
+        if self._lane_task is not None:
+            self._lane_task.cancel()
         await self.cancel_prefill()
         if self._slot_save_task is not None:
             self._slot_save_task.cancel()
@@ -1956,6 +2252,30 @@ async def shutdown() -> None:
 async def reserve_devices(owner: str, devices: tuple[str, ...], *,
                           yield_when_needed: Callable[[], Awaitable[None]] | None = None) -> None:
     await RUNTIME.reserve_devices(owner, devices, yield_when_needed=yield_when_needed)
+
+
+def paused_for_relaunch(caller: str) -> bool:
+    """True while a slot relaunch is in progress (the server stops and starts within it).
+
+    Background model callers outside a model lease (for example, the memory route)
+    skip or wait instead of failing against the stopped server; one journal line per caller
+    and relaunch replaces their tracebacks.
+    """
+    count = RUNTIME.resizing
+    if count is None:
+        return False
+    if caller not in RUNTIME._relaunch_quiet:
+        RUNTIME._relaunch_quiet.add(caller)
+        print(f"[models] {caller} paused during the slot relaunch to {count} slots")
+    return True
+
+
+def want_lane(lane: str, handoff: str | None = None) -> None:
+    RUNTIME.want_lane(lane, handoff)
+
+
+def drop_lane(lane: str) -> None:
+    RUNTIME.drop_lane(lane)
 
 
 async def release_devices(owner: str) -> None:

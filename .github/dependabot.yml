@@ -11,11 +11,6 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "npm"
-    directory: "/obsidience/discord"
-    schedule:
-      interval: "weekly"
-
-  - package-ecosystem: "npm"
     directory: "/obsidience/lights"
     schedule:
       interval: "weekly"

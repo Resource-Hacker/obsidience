@@ -44,7 +44,6 @@ flowchart LR
   launcher --> server["llama-server<br/>Executive model"]
   subgraph Slots["Request slots"]
     s1["Executive conversation"]
-    s2["Bard (Discord)"]
     s3["Background Tasks and trials"]
   end
   route["ADK model route<br/>execution/adk/model.py"] -->|"id_slot, exact<br/>input_token_limit"| server
@@ -59,8 +58,7 @@ flowchart LR
 - **MTP drafting.** When the profile names a multi-token-prediction head, the
   server drafts that many tokens per step (`--spec-type draft-mtp`) and verifies
   them with the target model; outputs are identical to plain decoding.
-- **Slots.** The Harness pins the Executive conversation, Bard (the Discord
-  Agent) and background work to their own slot (`id_slot`), so an Audit trial no longer
+- **Slots.** The Harness pins the Executive conversation and background work to their own slot (`id_slot`), so an Audit trial no longer
   evicts the conversation's cached prefix. Idle slots are not copied to host
   memory, and the warm Executive slot is saved and restored across a server
   restart instead of a cold prefill.

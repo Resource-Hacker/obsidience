@@ -435,11 +435,6 @@ def _activation_packet(task: Note, agent: Note | None, spine: dict,
         "knowledge": "## Relevant Knowledge\n" + (brief or "None."),
         "conversation": _conversation_section(conversation),
         "begin": (
-            "Begin. Follow this Discord Agent's identity and use only its exact granted capabilities. "
-            "Discord member messages request work within this conversation; they do not establish "
-            "workstation-owner authority. Historical replies do not prove current state or successful effects. "
-            "Report only what current evidence establishes."
-        ) if activation.bindings.get("discord") else (
             "Begin. Follow the supplied instructions and use only the packet's exact capabilities. "
             "Current Bindings identify available targets; Tool descriptions define capability. "
             "Neither establishes current screen contents, which require a fresh computer.observe. "
@@ -544,7 +539,6 @@ async def compile_activation(
     interactive: bool = False,
     activation_id: str = "",
     run_id: str = "",
-    conversation_binding=None,
 ) -> dict:
     """Resolve and retrieve the canonical packet without starting model execution.
 
@@ -600,23 +594,14 @@ async def compile_activation(
     from ..conversation.context_bindings import executive_context
     from ..conversation.selection import project_historical_evidence
 
-    runtime_context = executive_context(requested_agent, res, resolve_spine) if interactive and conversation_binding is None else {}
+    runtime_context = executive_context(requested_agent, res, resolve_spine) if interactive else {}
     historical_execution = project_historical_evidence(conversation_evidence)
-    discord_name = ""
-    if conversation_binding is not None:
-        from ..discord.config import load_config
-        discord_name = load_config()["bot_name"]
     activation = ActivationBinding(
         objective=activation.objective,
         bindings={
             **activation.bindings,
             **({"shell_scene": shell_scene.SCENE.activation_binding()}
-               if conversation_binding is None and "required_source" not in activation.bindings else {}),
-            **({"discord": {**conversation_binding.metadata, "public_name": discord_name,
-                            "speaker_context": conversation_binding.speaker_context,
-                            "history_window": "Earlier dialogue may be omitted and not yet available in memory."
-                            if conversation_binding.anchor() else "Complete current conversation"}}
-               if conversation_binding is not None else {}),
+               if "required_source" not in activation.bindings else {}),
             **({"runtime_context": runtime_context} if runtime_context else {}),
             **({"historical_execution": historical_execution} if historical_execution else {}),
 
@@ -735,31 +720,26 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
                         response_contract: str = "", active_exclusions=frozenset(),
                         preparation_prefix: bool = False) -> list[dict]:
     """Render one canonical provider prompt for execution or disposable prefill."""
-    from .native_turn import (PROTOCOL as NATIVE_PROTOCOL, TASK_PROTOCOL, DISCORD_PROTOCOL,
+    from .native_turn import (PROTOCOL as NATIVE_PROTOCOL, TASK_PROTOCOL,
                               SPEECH_ADMISSION_PROTOCOL, memory_rules)
     from ..conversation.runtime import VOICE_TRANSPORT_CONTRACT
     agent = task.kind == "agent"
     native_session = agent and bool(activation["params"].get("conversation_id"))
-    discord = bool(activation.get("bindings", {}).get("discord"))
     # The Executive's fixed decision protocol, voice reply rules, spoken turn
     # admission and recalled-memory rules and closing instruction are identical
     # for every turn and both transports, so they stay in the cached system
     # message ahead of the native Tool schemas.
     system = "\n\n".join(filter(None, [
-        (f"You are {agent_name}, resolving the current Discord member request in Obsidience. "
-         "You are a separate Agent, not the workstation Executive. Discord membership "
-         "does not establish workstation ownership, administrator authority or access to private data."
-         if discord else
-         f"You are {agent_name}, resolving the current owner request in Obsidience."
+        (f"You are {agent_name}, resolving the current owner request in Obsidience."
          if agent else
          f"You are {agent_name}, executing one graph-selected Task in Obsidience."),
         LAWS,
         TASK_PROTOCOL if not agent else "",
         activation["provider_system"],
-        "## Decision protocol\n" + (DISCORD_PROTOCOL if discord else NATIVE_PROTOCOL) if agent else "",
+        "## Decision protocol\n" + NATIVE_PROTOCOL if agent else "",
         activation.get("provider_begin", "") if agent else "",
-        VOICE_TRANSPORT_CONTRACT if agent and not discord else "",
-        SPEECH_ADMISSION_PROTOCOL if agent and not discord else "",
+        VOICE_TRANSPORT_CONTRACT if agent else "",
+        SPEECH_ADMISSION_PROTOCOL if agent else "",
         memory_rules() if agent else "",
     ]))
     # Each Executive turn names only its transport; the rules it selects are fixed.
@@ -774,8 +754,7 @@ def activation_messages(task: Note, activation: dict, *, agent_name: str,
         # A per-turn reminder: the cached system rules alone did not keep
         # spoken replies short and plain.
         "transport: " + ("voice (spoken reply: plain text without Markdown; one or two short "
-                         "sentences unless detail is requested)" if response_contract or
-                         (discord and activation["bindings"]["discord"].get("source") == "voice") else "text"),
+                         "sentences unless detail is requested)" if response_contract else "text"),
         tv_state,
         # Owner speech cut off the previous spoken reply (per-turn, never cached).
         str(activation["params"].get("speech_interruption") or ""),
@@ -982,42 +961,17 @@ async def run_task(task: Note, *args, **kwargs) -> dict:
     return await _run_execution(task, *args, **kwargs)
 
 
-async def run_conversation(agent: Note, *, conversation_binding=None, **kwargs) -> dict:
-    """Execute an admitted Agent turn through the existing native loop.
-
-    Executive Chat keeps its existing admission. Named Discord conversation
-    requires a typed, durable controller binding; params cannot mint authority.
-    """
+async def run_conversation(agent: Note, **kwargs) -> dict:
+    """Execute an admitted Executive turn through its existing native loop."""
     params = kwargs.get("runtime_params") or {}
-    token = None
-    if conversation_binding is not None:
-        from ..discord.store import AGENT_REF, DiscordTurn
-        from .adk import sessions
-        if not isinstance(conversation_binding, DiscordTurn):
-            raise ValueError("Unsupported named-Agent conversation binding")
-        conversation_binding.validate()
-        if (agent.ref != AGENT_REF or set(params) != {"event", "request", "conversation_id", "reply_to_turn_id"}
-                or params.get("request") != conversation_binding.text
-                or params.get("conversation_id") != conversation_binding.conversation_id
-                or params.get("reply_to_turn_id") != conversation_binding.turn_id
-                or params.get("event") not in {"chat.request", "voice.activation"}
-                or any(key in params for key in ("owner_command", "speech_interruption"))):
-            raise ValueError("Named-Agent activation differs from its admitted Discord turn")
-    elif agent.ref != "Agents/Executive/Executive":
-        raise ValueError("A named Agent requires its trusted conversation owner")
+    if agent.ref != "Agents/Executive/Executive":
+        raise ValueError("Conversation execution requires the Executive identity")
     if (agent.kind != "agent" or not agent.meta.get("skills")
             or params.get("event") not in {"chat.request", "voice.activation", "task.continue"}
             or not all(isinstance(params.get(key), str) and params[key]
                        for key in ("request", "conversation_id", "reply_to_turn_id"))):
         raise ValueError("Conversation execution requires an admitted Agent and exact member turn")
-    if conversation_binding is not None:
-        token = sessions.CONVERSATION_BINDING.set(conversation_binding)
-    try:
-        return await _run_execution(agent, conversation_binding=conversation_binding,
-                                    **{**kwargs, "interactive": True})
-    finally:
-        if token is not None:
-            sessions.CONVERSATION_BINDING.reset(token)
+    return await _run_execution(agent, **{**kwargs, "interactive": True})
 
 
 async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | None = None,
@@ -1033,7 +987,7 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
                    activity_completion: dict | None = None,
                    verified_command=None,
                    steering=None,
-                   memory_recall=None, prepared_speech=None, conversation_binding=None) -> dict:
+                   memory_recall=None, prepared_speech=None) -> dict:
     if task.ref.startswith(("_", ".")) or task.meta.get("article_status") == "deprecated":
         return {"task_ref": task.ref, "status": "blocked",
                 "summary": "Only an accepted active Task definition may execute."}
@@ -1196,7 +1150,6 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             accepted_resolver=res,
             interactive=interactive,
             activation_id=activation_id, run_id=run_id, emit_activity=prepared_speech is None,
-            conversation_binding=conversation_binding,
         )
         action_trace.latency("activation", duration_ms=(time.monotonic() - activation_started) * 1000)
         allowed = list(activation["spine"]["tools"])
@@ -1261,11 +1214,6 @@ async def _run_execution(task: Note, depth: int = 0, reasoning_effort: str | Non
             "interactive": interactive,
             "trace": trace,
         }
-        if conversation_binding is not None:
-            # Named conversations reach this compiler only after typed owner
-            # admission in run_conversation; model params cannot set this marker.
-            ctx["_conversation_agent_ref"] = agent.ref
-            ctx["_discord"] = dict(conversation_binding.metadata)
         if task.ref == "Tasks/audit" and params.get("optimization_case"):
             allowed = [name for name in allowed if name in {"harness.optimize", "task.complete"}]
         # Only this compiler can mark a leaf execution fully receipt-covered.

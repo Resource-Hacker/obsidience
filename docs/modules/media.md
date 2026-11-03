@@ -82,8 +82,8 @@ the end of a file.
 `media.library search(query, type: music)` checks native Jellyfin Audio first.
 Optional private configuration can enable public YouTube discovery for music,
 delivered directly or through a configured provider; no other music service is
-silently substituted. The Discord integration consumes those selections through
-its own player.
+silently substituted. Discovery returns source identities; playback requires a
+separately configured destination and a verified player receipt.
 
 ## Optional source providers
 

@@ -57,8 +57,8 @@ async def model(request: Request):
     payload.update(model=spec.id, stream=False,
         max_tokens=min(int(incoming.get("max_completion_tokens", incoming.get("max_tokens", spec.max_output_tokens))), spec.max_output_tokens),
         chat_template_kwargs={"enable_thinking": False},
-        # Background extraction stays off the Executive's and Bard's slots.
-        **runtime.slot_fields(spec, runtime.TASK_SLOT))
+        # Background extraction stays off the Executive's slot.
+        **runtime.slot_fields(spec, runtime.TASK_LANE))
     owner = runtime.RUNTIME
     ready = asyncio.Event()
     def activity(busy):
@@ -70,13 +70,16 @@ async def model(request: Request):
         async with asyncio.timeout(540):
             # Wait only on the existing owner's activity/lock edges. This is a
             # background provider request, never an additional agent scheduler.
-            while owner.work_requested or owner.lock.locked():
+            while owner.work_requested or owner.lock.locked() or runtime.paused_for_relaunch("Memory route"):
                 ready.clear()
                 if owner.work_requested:
                     await ready.wait()
                 else:
+                    # A slot relaunch holds the lock while the server restarts: wait it out.
                     async with owner.lock:
                         pass
+                    if owner.resizing is not None:
+                        await asyncio.sleep(1)
                 if await request.is_disconnected():
                     raise HTTPException(499, "Memory provider disconnected")
             async with owner.resident_prefill(spec) as admitted:

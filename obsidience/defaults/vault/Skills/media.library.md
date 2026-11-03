@@ -8,19 +8,13 @@ obsidience:
   owner_maintained: true
 ---
 
-For current Discord audio controls, use `discord.control` with only
-`action:pause`, `action:resume` or `action:stop`. Resuming paused audio needs no
-track id, catalogue lookup, memory recall or search. This Tool's `resume` action
-only reads saved Jellyfin progress for an exact catalogue item UUID, never a
-short playback selection id. Do not search or replay a track to recover from a
-failed or uncertain resume.
-
 For songs, artists or music, call `search` with `type:music`, never `movie` or
 `series`. This checks native music and then public YouTube music. Prefer the requested recording
 from its artist or official channel. Returned `id`
 values are already bound for playback in the same activation: no extra `select`
-call is required. For an explicit play request, send one matching id to the
-requested destination; in Discord use `discord.control play(id,media_kind:audio)`.
+call is required. For an explicit desktop play request, open the matching
+public YouTube URL through the granted `application.launch` Tool. Other playback
+destinations require their own configured delivery contract.
 For an artist-only request, choose a matching official/top track without asking
 which song unless the results are genuinely ambiguous. Preserve an explicitly
 requested song, version, live recording or remix. A search-only request remains

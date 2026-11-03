@@ -292,6 +292,77 @@ Quickshell session-lock path covers every Hyprland output and authenticates
 through PAM; greetd remains responsible for fresh login. A native Polkit UI,
 HDR, fullscreen VRR, and Samsung WoW behavior remain explicit acceptance gates.
 
+## CPU policy
+
+The following opt-in examples were developed for one 32-thread, two-CCD workstation.
+Adapt the CPU lists and weights to the target machine before installing any drop-ins;
+they are not portable defaults. systemd applies installed policy through cgroup v2
+`AllowedCPUs=` and `CPUWeight=` (systemd.resource-control(5)).
+
+| Where | Cores | Weight | Why |
+|---|---|---|---|
+| Gemma (`obsidience-gemma`, `CPUAffinity`), PipeWire, dbus-broker | CCD0 0-7,16-23 | 500 / default | model sampling, audio callbacks |
+| Speech worker (`OBSIDIENCE_SPEECH_CPUS`) | 8-11,24-27 | Harness 100 | voice, alone on its cores |
+| Harness, Shell host, other `obsidience-shell-*`/`obsidience-tv-*` (`30-ccd1.conf`) | CCD1 8-15,24-31 | unit | non-model work off CCD0 |
+| Graph stage, TV tuner/player/session/Sunshine/audio (`35-cpu-policy.conf`) | 12-15,28-31 | unit | off the voice cores |
+| `obsidience-workers.slice`: every tmux pane (`tmux-spawn-.scope.d`) | 12-15,28-31 | 20 (`idle` in a lease) | Claude/Codex sessions, builds, validations |
+| `session.slice` (Hyprland, PipeWire, portals) | any | 1000 | compositor and audio win contention |
+
+Install (user scope; then `systemctl --user daemon-reload`):
+
+```sh
+cp -r obsidience/shell/systemd/obsidience-workers.slice obsidience/shell/systemd/session.slice.d \
+  obsidience/shell/systemd/tmux-spawn-.scope.d obsidience/shell/systemd/obsidience-shell-.service.d \
+  obsidience/shell/systemd/obsidience-shell-knowledge.service.d \
+  obsidience/tv/systemd/obsidience-tv-*.service.d ~/.config/systemd/user/
+cp obsidience/harness/systemd/obsidience-harness-dev.service.d/3*.conf \
+  ~/.config/systemd/user/obsidience-harness-dev.service.d/
+```
+
+Slice weights and `AllowedCPUs=` apply on reload without restarting services; new
+tmux panes join the workers slice while existing panes keep their current placement.
+Rollback removes only the installed drop-ins and reloads the user manager.
+
+`obsidience-shell-game-mode.service` discovers actual Steam and known Battle.net game
+windows, then follows exact process lifetimes with pidfds. It registers them through
+installed GameMode's public PID-FD supervisor API. Launchers and updaters
+are excluded. Closing a window or restarting the observer does not end a live game's
+registration; GameMode reaps exited games (normally within five seconds). Discovery starts
+when the first game window maps; existing `gamemoderun` and WoW launchers can activate earlier.
+Unknown Battle.net executable names need an addition to the observer's explicit list.
+
+Steam detection works without installation-specific game roots. To opt into
+Battle.net discovery, add a local service drop-in for
+`obsidience-shell-game-mode.service`:
+
+```ini
+[Service]
+Environment="OBSIDIENCE_BATTLENET_ROOTS=/srv/games:/opt/games"
+```
+
+Set the colon-separated list to existing absolute game directories on that
+machine; `~`, `/` and invalid paths are rejected. An empty list admits no
+Battle.net games. Reload the user manager and restart only the observer after
+configuring it.
+
+The optional `obsidience-game-mode-profile.service` requires a separately reviewed
+local `~/bin/obsidience-wow-exclusive` helper and local GameMode first/last hooks.
+Those installation-specific components are not distributed here. The native GameMode
+observer remains useful without this profile. A configured local profile can pause
+graph rendering and screen replay or adapt TV modes, but a fresh installation must
+not assume those effects are available.
+
+Choose GameMode CPU affinity and scheduling policy for the target hardware. Launcher
+Ananicy rules should preserve normal scheduling and unrestricted CPU affinity so
+children do not inherit idle policy.
+
+Use `session/game-mode --inspect` for read-only discovery and `--status` for the observer
+receipt. Deploy this adapter with `obsidience/scripts/deploy --only gaming --restart gaming`;
+it does not restart the desktop or voice. GameMode is an unmodified system dependency.
+Omarchy's Steam installer and `default/hypr/apps/steam.lua` at
+`1801adc1983b06f6ab218f8060e430cb3477d8d0` were consulted; they provide installation/window
+rules rather than a game-lifetime resource owner. No Omarchy code is copied here.
+
 ## Surface contract
 
 A Surface is an Obsidience presentation endpoint, not an Article kind or raw
@@ -377,7 +448,7 @@ Before a live session change:
 Hyprland --verify-config --config obsidience/shell/adapter/hyprland/hyprland.lua
 desktop-file-validate obsidience/shell/session/obsidience.desktop
 systemd-analyze --user verify obsidience/shell/systemd/*.service \
-  obsidience/shell/systemd/*.target
+  obsidience/shell/systemd/*.target obsidience/shell/systemd/*.slice
 ```
 
 Live acceptance requires all three exact output geometries and GPUs, one

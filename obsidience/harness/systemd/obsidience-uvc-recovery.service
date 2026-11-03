@@ -1,0 +1,32 @@
+[Unit]
+Description=Device-scoped Brio UVC timeout recovery
+After=systemd-journald.service systemd-udevd.service
+StartLimitIntervalSec=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/obsidience-uvc-recovery
+RuntimeDirectory=obsidience-uvc-recovery
+RuntimeDirectoryMode=0700
+StateDirectory=obsidience-uvc-recovery
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=12s
+KillMode=control-group
+UMask=0077
+Nice=10
+CPUWeight=20
+IOWeight=20
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

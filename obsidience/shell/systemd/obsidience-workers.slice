@@ -1,0 +1,9 @@
+[Unit]
+Description=Obsidience agent workers: tmux panes (Claude/Codex sessions, builds, validations)
+
+# Policy table: obsidience/shell/README.md "CPU policy". CCD1 12-15,28-31 only, away from
+# model work (CCD0) and voice (8-11,24-27), below app.slice and session.slice.
+# ~/bin/obsidience-wow-exclusive sets CPUWeight=idle at runtime during a lease and restores it.
+[Slice]
+AllowedCPUs=12-15,28-31
+CPUWeight=20

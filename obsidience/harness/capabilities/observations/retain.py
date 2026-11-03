@@ -17,6 +17,7 @@ def execute(args: dict, context: dict) -> str:
     if any(ref not in allowed for ref in refs):
         raise PermissionError('Memory references must remain within the Agent\'s checked-out graph')
     created = MEMORY.enqueue(agent.ref, args['text'], source='observation',
-                             identifier=context['run_id'], related_refs=refs)
+                             identifier=context['run_id'], related_refs=refs,
+                             scope=context.get('_memory_scope', ''))
     return ('Observation queued for Hindsight retention.' if created else
             'This exact observation has already been queued for Hindsight retention.')

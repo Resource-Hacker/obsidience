@@ -62,15 +62,6 @@ The specialists orbit the Executive as satellites in the graph. Each Agent has
 its own Hindsight memory bank; owner inspection grants no Agent cross-bank
 access. See [Memory](../memory.md).
 
-## Optional integration Agents
-
-Optional integrations use the same identity, direct Skills, Knowledge checkout
-and separate Memory contracts. The starter Vault includes the **Obsidience
-Discord Bot** (role `OmniBot`), which converses in its own admitted Discord
-conversations, shares the execution and model owners with the Executive and
-keeps its own history, Skills, scoped Knowledge and Hindsight bank. Discord
-members are external speakers and never inherit workstation-owner authority.
-
 ## Starter Vault Agents
 
 <!-- catalogue:agents -->

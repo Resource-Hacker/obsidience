@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..config import CONFIG
-from ..discord.config import load_config as load_discord_config, socket_path as discord_socket_path
 from ..conversation import runtime as conversation_runtime
 from ..conversation.selection import EXECUTIVE_REF
 from ..knowledge.vault import resolver
@@ -127,6 +126,7 @@ class ProvisionalReply:
         self._claim_error = claim_error
         self.halted = False  # Set for the turn by a failed claim or rejection.
         self._live = False
+        self._advertised = ()
         self._text = ""
         self._offered = 0
         # Raw text handed to the worker and the open worker reply's playback.
@@ -137,9 +137,11 @@ class ProvisionalReply:
         self.acknowledged = False
         self.timed = False
 
-    def begin_step(self, *, eligible: bool) -> None:
+    def begin_step(self, *, eligible: bool, advertised=()) -> None:
         self._live = eligible and not self.halted
+        self._advertised = tuple(advertised)
         self._text, self._offered = "", 0
+
 
     async def acknowledge(self) -> bool:
         """Say "On it." while a slow Tool runs: once per run, before any reply audio.
@@ -183,11 +185,20 @@ class ProvisionalReply:
         if not position and _TOOL_TEXT.match(text):
             self._live = False  # A textual Tool imitation is never voiced.
             return
+        from ..execution.native_turn import imitates_tool, tool_text_start
+        if imitates_tool(text, self._advertised):
+            self._live = False
+            return
+        # Prose may precede an invocation. Hold its earliest possible start,
+        # including names split across deltas, while earlier sentences can speak.
+        held = None if final else tool_text_start(text, self._advertised, partial=True)
         ends = [match.start() if match.group() == "\n" else match.end()
                 for match in _SPOKEN_BOUNDARY.finditer(text, position)]
         if final:
             ends.append(len(text))
         for end in ends:
+            if held is not None and end > held:
+                break
             chunk = text[position:end].rstrip()
             if not any(character.isalpha() for character in chunk):
                 continue  # Join list numbers and blank lines to the next phrase.
@@ -228,12 +239,6 @@ class RealtimeSessionManager:
         self._stall_task: asyncio.Task | None = None
         self._uma8_power_cycled_at = -UMA8_POWER_CYCLE_SECS
         self._transport_ready = False
-        self._desktop_disabled = False
-        self._discord_ready = False
-        self._discord_encoder_graphs: int | None = None
-        self._discord_owned = False
-        self._discord_stopping = False
-        self._discord_error: str | None = None
         self._phase: RealtimePhase = "off"
         self._mode = "wake"
         self._desired_mode = "off"
@@ -286,16 +291,6 @@ class RealtimeSessionManager:
         self._provisional: ProvisionalReply | None = None
         self.conversation = conversation or conversation_runtime.RUNTIME
 
-    @staticmethod
-    def _discord_enabled() -> bool:
-        try:
-            return load_discord_config().get("enabled") is True
-        except (OSError, ValueError, TypeError):
-            return False  # Malformed integration configuration grants no worker.
-
-    def _discord_only_wanted(self) -> bool:
-        return (not self._closed and self._discord_enabled()
-                and (self._desired_mode == "off" or self._audio_reconnect_pending))
 
     def scheduler_paused(self) -> bool:
         # Accepted wake/recognized speech is foreground demand. Passive room
@@ -324,7 +319,7 @@ class RealtimeSessionManager:
     def snapshot(self) -> dict[str, Any]:
         process = self._process
         aec_backend = (media_runtime.realtime_aec_backend()
-                       if not self._audio_reconnect_pending and not self._desktop_disabled else "none")
+                       if not self._audio_reconnect_pending else "none")
         return {
             "schema_version": 1,
             "phase": self._phase,
@@ -335,11 +330,6 @@ class RealtimeSessionManager:
             "enabled": self._phase not in {"off", "error"},
             "ready": self._phase in READY_PHASES,
             "transport_ready": self._transport_ready,
-            "discord_speech": {"ready": self._discord_ready,
-                               "encoder_cuda_graphs": self._discord_encoder_graphs if self._discord_ready else None,
-                               "active": self._discord_owned,
-                               "desktop_disabled": self._desktop_disabled,
-                               "last_error": self._discord_error},
             "proactive": self._phase == "proactive",
             "requested_proactive": self._requested_proactive,
             "pid": None if process is None or process.returncode is not None else process.pid,
@@ -413,14 +403,9 @@ class RealtimeSessionManager:
     async def publish_readiness(self) -> None:
         await self._publish("state", reason="executive_readiness")
 
-    async def _discord_speech_ownership(self, active: bool) -> None:
-        if type(active) is not bool or active == self._discord_owned:
-            return
-        self._discord_owned = active
-        await self.conversation.set_idle_preparation_blocked(active)
 
     def _model_activity(self, busy: bool) -> None:
-        if busy and not self._desktop_disabled:
+        if busy:
             self.conversation.invalidate_readiness()
         self._standby_event.set()
 
@@ -595,12 +580,7 @@ class RealtimeSessionManager:
             if self._closed:
                 return
             if not model_runtime.RUNTIME.work_requested:
-                if (self._audio_reconnect_pending or self._paused_for_work) and self._discord_only_wanted():
-                    try:
-                        await self._start_discord_only()
-                    except (OSError, RuntimeError, ValueError) as exc:
-                        self._discord_error = type(exc).__name__
-                elif self._paused_for_work and self._desired_mode == "wake":
+                if self._paused_for_work and self._desired_mode == "wake":
                     try:
                         await self._start_admitted(mode="wake", only_if_requested=True)
                     except (OSError, RuntimeError, ValueError):
@@ -618,7 +598,7 @@ class RealtimeSessionManager:
             await self.publish_readiness()
 
     async def _yield_for_model(self) -> None:
-        if self._desired_mode == "wake" or self._desktop_disabled:
+        if self._desired_mode == "wake":
             self._paused_for_work = True
             # A cancelled model request must still finish the speech handoff;
             # otherwise a stopped worker can retain an unreleasable GPU lease.
@@ -818,18 +798,15 @@ class RealtimeSessionManager:
             str(POCKET_ROOT),
             "--voice",
             self._tts_voice,
-            "--input-channel", "left" if not self._desktop_disabled and media_runtime.realtime_aec_backend() == "uma8" else "mono",
+            "--input-channel", "left" if media_runtime.realtime_aec_backend() == "uma8" else "mono",
             "--wake-word", self._wake_word,
             "--mode", self._mode,
             "--mode-revision", str(self._mode_revision),
             "--startup-confirmation",
-            REALTIME_CONFIRMATION if self._mode == "realtime" and not self._desktop_disabled else "",
+            REALTIME_CONFIRMATION if self._mode == "realtime" else "",
         )
-        if self._discord_enabled():
-            command += ("--discord-socket", str(discord_socket_path("speech")))
-        if self._desktop_disabled:
-            command += ("--desktop-disabled",)
         return command
+
 
     async def _send_worker(self, payload: dict[str, Any], *, provisional: bool = False) -> None:
         # provisional: early reply speech; its cancel retracts only that audio.
@@ -1128,182 +1105,11 @@ class RealtimeSessionManager:
             key: event[key] for key in ("generation", "speech_sequence", "turn_id", "run_id")
         })
 
-    async def _start_discord_only(self) -> dict[str, Any]:
-        """Retain the sole PCM owner while desktop input is muted or unavailable."""
-        if not self._discord_only_wanted():
-            return self.snapshot()
-        if model_runtime.RUNTIME.work_requested:
-            self._paused_for_work = True
-            return self.snapshot()
-        async with self._lock:
-            if self._process is not None or not self._discord_only_wanted():
-                return self.snapshot()
-            if not REALTIME_PYTHON.is_file() or not NEMOTRON_MODEL.is_file():
-                raise RuntimeError("the pinned shared speech runtime is unavailable")
-            self._operation += 1
-            await self._discord_speech_ownership(False)
-            operation = self._operation
-            self._desktop_disabled = True
-            self._discord_stopping = False
-            self._discord_ready = False
-            self._discord_error = None
-            self._phase = "error" if self._audio_reconnect_pending else "off"
-            self._transport_ready = False
-            try:
-                # Read only voice selection. No device catalog, microphone
-                # preparation, AEC/reference links or speaker route is acquired.
-                media = await asyncio.to_thread(media_runtime.settings)
-                self._tts_voice = media["tts_voice"]
-                await model_runtime.reserve_devices(
-                    RUNTIME_LEASE_OWNER, (model_runtime.RTX_4080_DEVICE,),
-                    yield_when_needed=self._yield_for_model,
-                )
-                self._hardware_leased = True
-                child_env = {**os.environ,
-                             "PYTHONPATH": ":".join((str(PROJECT_ROOT), "/var/lib/ai/src/obsidience-nemo-speech")),
-                             "CUDA_DEVICE_ORDER": "PCI_BUS_ID",
-                             # ASR shares the chipset RTX 4000 with the model (owner, 2026-10-18); the 4080
-                             # reservation above still keeps models off the desktop GPU while speech runs.
-                             "CUDA_VISIBLE_DEVICES": model_runtime.GPU_UUIDS[media_runtime.ASR_DEVICE],
-                             "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1",
-                             "TRANSFORMERS_OFFLINE": "1", "PYTHONUNBUFFERED": "1"}
-                for key in ("PULSE_SOURCE", "PULSE_SINK", "PULSE_PROP"):
-                    child_env.pop(key, None)
-                self._process = await asyncio.create_subprocess_exec(
-                    *self._command(), cwd=str(PROJECT_ROOT), env=child_env,
-                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE, start_new_session=True,
-                )
-                self._started_ns = time.monotonic_ns()
-                model_runtime.RUNTIME.set_reservation_process(RUNTIME_LEASE_OWNER, self._process.pid)
-                self._paused_for_work = False
-            except BaseException:
-                process, self._process = self._process, None
-                if process is not None and process.returncode is None:
-                    with contextlib.suppress(ProcessLookupError):
-                        os.killpg(process.pid, signal.SIGKILL)
-                    await process.wait()
-                if self._hardware_leased:
-                    await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-                    self._hardware_leased = False
-                self._desktop_disabled = False
-                raise
-            self._monitor = asyncio.create_task(
-                self._monitor_discord_process(self._process, operation), name="obsidience-shared-speech-monitor")
-            await self._publish("state", reason="discord_speech_starting")
-            return self.snapshot()
-
-    async def _stop_discord_only_locked(self) -> dict[str, Any]:
-        # Keep admission locked through reaping and lease release: a desktop
-        # reconnect must not race another Discord-only model acquisition.
-        process = self._process
-        self._discord_stopping = True
-        self._discord_ready = False
-        if process is not None and process.returncode is None:
-            if process.stdin is not None:
-                with contextlib.suppress(OSError, RuntimeError):
-                    process.stdin.write(b'{"type":"stop"}\n')
-                    await process.stdin.drain()
-                process.stdin.close()
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGINT)
-        if process is not None:
-            try:
-                await asyncio.wait_for(process.wait(), timeout=60)
-            except TimeoutError:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                await process.wait()
-        await self._discord_speech_ownership(False)
-        self._process = None
-        if self._hardware_leased:
-            await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-            self._hardware_leased = False
-        self._desktop_disabled = False
-        self._started_ns = None
-        self._phase = "error" if self._audio_reconnect_pending else "off"
-        await self._publish("state", reason="discord_speech_stopped")
-        return self.snapshot()
-
-    async def _monitor_discord_process(self, process, operation):
-        """Observe shared model lifecycle without touching Executive work."""
-        tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
-        drain = asyncio.create_task(self._drain_stderr(process.stderr, tail))
-        try:
-            while raw := await process.stdout.readline():
-                if self._process is not process or self._operation != operation:
-                    return
-                if len(raw) > MAX_WORKER_EVENT_BYTES:
-                    continue
-                try:
-                    event = json.loads(raw)
-                except (ValueError, TypeError):
-                    continue
-                if (isinstance(event, dict) and event.get("type") == "discord_ownership"
-                        and not self._discord_stopping):
-                    await self._discord_speech_ownership(event.get("active"))
-                    continue
-                if isinstance(event, dict) and event.get("type") == "discord_ready" and not self._discord_stopping:
-                    self._discord_ready = True
-                    count = event.get("encoder_cuda_graphs")
-                    self._discord_encoder_graphs = count if type(count) is int and 0 <= count <= 8 else None
-                    await self._publish("state", reason="discord_speech_ready")
-            returncode = await process.wait()
-            async with self._lock:
-                if self._process is not process or self._operation != operation or self._discord_stopping:
-                    return
-                self._discord_ready = False
-                self._discord_error = "shared_speech_exited"
-                self._process = None
-                self._desktop_disabled = False
-                self._started_ns = None
-                if self._hardware_leased:
-                    await model_runtime.release_devices(RUNTIME_LEASE_OWNER)
-                    self._hardware_leased = False
-                restart = (self._discord_only_wanted()
-                           and (self._crash_restart_at is None
-                                or time.monotonic() - self._crash_restart_at > CRASH_RESTART_WINDOW_SECS))
-                await self._publish("state", reason="discord_speech_exited", returncode=returncode)
-                if restart:
-                    self._restart_task = asyncio.create_task(self._restart_discord_after_exit(operation))
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            # A failed reader cannot leave a live, unobserved model lease.
-            async with self._lock:
-                if self._process is process and self._operation == operation:
-                    self._discord_error = "shared_speech_monitor_failed"
-                    await self._stop_discord_only_locked()
-        finally:
-            if self._operation == operation:
-                await self._discord_speech_ownership(False)
-            if not drain.done():
-                drain.cancel()
-            await asyncio.gather(drain, return_exceptions=True)
-
-    async def _restart_discord_after_exit(self, operation):
-        try:
-            await asyncio.sleep(CRASH_RESTART_DELAY_SECS)
-            if self._closed or self._operation != operation or self._process is not None:
-                return
-            self._crash_restart_at = time.monotonic()
-            await self._ensure_muted_shared()
-        finally:
-            if self._restart_task is asyncio.current_task():
-                self._restart_task = None
-
-    async def _ensure_muted_shared(self):
-        if self._discord_only_wanted():
-            try:
-                await self._start_discord_only()
-            except (OSError, RuntimeError, ValueError) as exc:
-                self._discord_error = type(exc).__name__
-                await self._publish("state", reason="discord_speech_unavailable")
 
     async def start(self, *, mode: str = "realtime") -> dict[str, Any]:
         from ..execution.scheduler import foreground_admission
 
-        if self._process is not None and not self._desktop_disabled:
+        if self._process is not None:
             return await self.set_listening_mode(mode)
         if self._unsubscribe_activity is not None:
             # restore() owns the device watcher; it ends while voice is off.
@@ -1348,7 +1154,6 @@ class RealtimeSessionManager:
             requested = {}
         mode = requested.get("mode", "wake")
         if mode == "off":
-            await self._ensure_muted_shared()
             return self.snapshot()
         if mode not in {"wake", "realtime"}:
             mode = "wake"
@@ -1375,8 +1180,6 @@ class RealtimeSessionManager:
             if only_if_requested and (self._closed or self._desired_mode != mode
                                       or not self._paused_for_work):
                 return self.snapshot()
-            if self._desktop_disabled:
-                await self._stop_discord_only_locked()
             if self._process is not None:
                 return self.snapshot()
             # Bind the worker and its status to the accepted Executive identity.
@@ -1388,10 +1191,6 @@ class RealtimeSessionManager:
             if not NEMOTRON_MODEL.is_file():
                 raise RuntimeError("the pinned Nemotron streaming ASR model is unavailable")
             self._operation += 1
-            await self._discord_speech_ownership(False)
-            self._desktop_disabled = False
-            self._discord_stopping = False
-            self._discord_ready = False
             self._mode = self._desired_mode = mode
             self._wake_open = False
             operation = self._operation
@@ -1518,8 +1317,6 @@ class RealtimeSessionManager:
             return await self.stop()
         if mode not in {"wake", "realtime"}:
             raise ValueError("Voice mode must be wake, realtime or off")
-        if self._desktop_disabled:
-            return await self.start(mode=mode)
         if self._process is not None and self._process.returncode is not None:
             await self.stop(preserve_requested=True)
         if self._process is None:
@@ -1581,17 +1378,6 @@ class RealtimeSessionManager:
                     media_runtime._atomic_json(self._requested_state_path, {"mode": "off"})
                 except OSError as exc:
                     intent_error = exc
-            if self._desktop_disabled:
-                # Explicit mute still clears the preserved desktop wake intent;
-                # the independent Discord consumer keeps the same worker.
-                if for_work or self._closed or not self._discord_enabled():
-                    await self._stop_discord_only_locked()
-                else:
-                    self._phase = "error" if self._audio_reconnect_pending else "off"
-                    await self._publish("state", reason="desktop_speech_stopped")
-                return stopped_snapshot()
-            self._discord_ready = False
-            conversation_id = self.conversation._conversation.conversation_id
             process = self._process
             operation = self._operation
             if process is None or process.returncode is not None:
@@ -1645,7 +1431,6 @@ class RealtimeSessionManager:
                     "",
                     session_boundary="realtime.stopped",
                 )
-            await self._ensure_muted_shared()
             return stopped_snapshot()
         try:
             await asyncio.wait_for(process.wait(), timeout=5 if audio_lost else 60)
@@ -1686,7 +1471,6 @@ class RealtimeSessionManager:
             await self._publish("state", reason="stopped")
         if not for_work:
             await self.conversation.finalize_pending("", session_boundary="realtime.stopped")
-            await self._ensure_muted_shared()
         return stopped_snapshot()
 
     async def _monitor_process(
@@ -1738,15 +1522,6 @@ class RealtimeSessionManager:
                 if self._mode == "wake" and not isinstance(worker_event, dict):
                     # Upstream diagnostic text may include raw ASR tokens.
                     # Ambient recognition is never a retained public log.
-                    continue
-                if event_type == "discord_ownership":
-                    await self._discord_speech_ownership(worker_event.get("active"))
-                    continue
-                if event_type == "discord_ready":
-                    self._discord_ready = True
-                    count = worker_event.get("encoder_cuda_graphs")
-                    self._discord_encoder_graphs = count if type(count) is int and 0 <= count <= 8 else None
-                    await self._publish("state", reason="discord_speech_ready")
                     continue
                 if event_type in {"speech_candidate", "speech_candidate_invalidated",
                                   "speech_candidate_failed", "speech_admission"}:
@@ -2071,9 +1846,7 @@ class RealtimeSessionManager:
                     return
                 if self._phase == "stopping":
                     return
-                conversation_id = self.conversation._conversation.conversation_id
                 self._phase = "stopping"
-                self._discord_ready = False
                 self._wake_open = self._capture_active = self._user_speaking = False
                 await self.conversation.cancel()
                 if self._aec_active:
@@ -2147,7 +1920,6 @@ class RealtimeSessionManager:
                     # another operation's lease. Stop retains exact ownership.
         finally:
             if operation == self._operation:
-                await self._discord_speech_ownership(False)
                 await self._cancel_speech_candidate()
 
     @staticmethod

@@ -1,0 +1,17 @@
+[Unit]
+Description=Obsidience optional gaming resource profile
+ConditionFileIsExecutable=%h/bin/obsidience-wow-exclusive
+BindsTo=gamemoded.service
+After=gamemoded.service
+PartOf=obsidience-shell-session.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/bin/obsidience-wow-exclusive acquire gamemode
+ExecStart=-%h/Projects/obsidience/obsidience/tv/host/mode gaming-start
+ExecStop=-%h/Projects/obsidience/obsidience/tv/host/mode gaming-end
+ExecStopPost=%h/bin/obsidience-wow-exclusive release gamemode
+TimeoutStartSec=180
+TimeoutStopSec=180
+UMask=0077

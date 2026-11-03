@@ -187,6 +187,11 @@ Vault. It includes the Executive, Alexandria, Darwin and Heimdall; their reusabl
 capability library, project architecture and ordinary knowledge subjects. It
 contains no previous owner's computer inventory or personal knowledge.
 
+This public snapshot excludes Obsidience Discord bots, bot personas and their
+private deployment tooling. The desktop Executive and core Agent workflows are
+the supported publication scope; installation and hardware acceptance remain
+operator responsibilities.
+
 From the repository root, prepare the Python dependencies (the Executive's Google
 ADK loop is a pinned Python requirement) and the pinned optimizer components:
 

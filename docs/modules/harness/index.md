@@ -23,7 +23,7 @@ Packages stay shallow: one level of subsystems, explicit imports and
 | `realtime/` | The speech connection, devices, camera and the speech worker (`realtime/speech/`) |
 | `graphs/` | Activity and refresh for the Memory and Code views |
 | `shell_port/` | The Harness side of the Shell Scene and command boundary |
-| `web/`, `media/`, `tv/`, `discord/`, `host/` | Web lookup, media and TV clients, the Discord integration, host inventory |
+| `web/`, `media/`, `tv/`, `host/` | Web lookup, media and TV clients, host inventory |
 
 ## The Executive loop
 

@@ -11,6 +11,22 @@ by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/
 
 ## [Unreleased]
 
+### Changed
+
+- **Harness.** Lease independent model slots for Executive conversation and
+  background Tasks. Preserve prompt caches across model restarts, improve speech
+  admission and wake handling, and require evidence for action and playback claims.
+- **Shell.** Add native GameMode observation for Steam and configured Battle.net
+  installations, optional workstation CPU policies, and Samsung game placement.
+- **TV.** Follow connected viewing clients and resolve desktop mirrors by Surface.
+- **Hardware.** Add hardware inspection and bounded UVC camera recovery tooling.
+
+### Removed
+
+- Discord bot services, personas, speech and game integrations, graph presentation,
+  starter Articles, and deployment tooling from the public distribution. The
+  interactive demo and dependency update configuration follow the same scope.
+
 ## [0.1.0] - 2026-10-20
 
 The first public release of Obsidience, a graph-native, local-first agent
@@ -136,8 +152,7 @@ harness and Linux desktop shell. Everything below is new in this release.
 
 #### Other integrations
 
-- An optional Discord bot with isolated conversations, voice and a live graph
-  camera, and an optional Matter lights controller with music visualization.
+- An optional Matter lights controller with music visualization.
 
 #### Project
 

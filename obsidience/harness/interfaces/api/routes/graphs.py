@@ -39,7 +39,8 @@ def banks(agent_ref: str = "", bank: str = "", scene: Literal["executive", "all"
         note = load_note(ref + ".md")
         if note and (not agent_ref or ref == agent_ref) and (not selected_bank or bank == selected_bank) \
                 and (agent_ref or selected_bank or scene == "all" or agent_scene(ref) == scene):
-            result.append({"id": bank, "name": note.title, "agent_ref": ref, "scene": agent_scene(ref),
+            name = note.title + (" · scope " + MEMORY.scopes[bank] if bank in MEMORY.scopes else "")
+            result.append({"id": bank, "name": name, "agent_ref": ref, "scene": agent_scene(ref),
                            "count": len(MEMORY.records.get(bank, {}))})
     return {"banks": sorted(result, key=lambda b: ("Executive" not in b["agent_ref"], b["name"])),
             "status": MEMORY.status()["status"]}

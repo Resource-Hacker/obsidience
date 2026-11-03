@@ -214,8 +214,12 @@ def _refused_before_dispatch(item: dict) -> bool:
         result = json.loads(item.get("obs") or "")
     except (TypeError, ValueError):
         return False
-    return (isinstance(result, dict) and result.get("delivery") == "not_dispatched"
-            and (result.get("failure") or {}).get("code") == "controller_target_mismatch")
+    if not isinstance(result, dict) or result.get("delivery") != "not_dispatched":
+        return False
+    failure = result.get("failure")
+    # A failure may be a bare code string (seen live 2026-10-29 18:40: 'str' object has no attribute 'get').
+    code = failure.get("code") if isinstance(failure, dict) else failure
+    return code == "controller_target_mismatch"
 
 
 def _latest_computer_results(context: dict) -> dict:
@@ -251,8 +255,7 @@ def native_text_arguments(text: str, context: dict) -> dict:
     if any((item.get("completion_evidence") or {}).get("verified") is not True
            for item in _latest_computer_results(context).values()):
         status = "failed"
-    if (context.get("_tv_control_failed") or context.get("_media_acquire_failed")
-            or context.get("_discord_control_failed") or context.get("_discord_admin_failed")):
+    if context.get("_tv_control_failed") or context.get("_media_acquire_failed"):
         status = "failed"
     if _pending_staged_proposals(context):
         status = "review"
@@ -302,21 +305,6 @@ _EFFECT_CLAIMS = (
 )
 
 
-def _discord_media_claim_verified(claim: str, context: dict) -> bool:
-    """Use this run's complete transport receipt, not truncated trace text."""
-    for encoded_args, receipt in reversed(list(context.get("_discord_control_attempts", {}).items())):
-        action = json.loads(encoded_args).get("action")
-        if action not in {"play", "pause", "resume", "stop", "leave", "continuous"}:
-            continue
-        # A later playback/resume or failed effect invalidates an earlier stop.
-        expected = "stop" if claim == "stopped" else "pause"
-        return (action == expected and receipt.get("ok") is True
-                and receipt.get("status") == "completed"
-                and receipt.get("playback") == ("idle" if expected == "stop" else "paused")
-                and not receipt.get("must_not_replay"))
-    return False
-
-
 def _effect_claim_error(summary: str, context: dict) -> str | None:
     """Reject a reported open/pause effect without this run's verified receipt.
 
@@ -329,13 +317,6 @@ def _effect_claim_error(summary: str, context: dict) -> str | None:
         for claim in pattern.finditer(summary):
             sentence = re.split(r"[.!?]", summary[claim.start():].lstrip(".!? "), maxsplit=1)[0]
             if not _RECAP.search(sentence) and not tools & verified:
-                action = claim.groupdict().get("media_action")
-                if action and _discord_media_claim_verified(action, context):
-                    continue
-                if action and context.get("_discord"):
-                    return ("No current verified Discord pause/stop receipt supports this claim. "
-                            "Use discord.control only if the current request calls for that action; "
-                            "never replay failed or uncertain delivery or restart rejected media.")
                 return message
     return None
 
@@ -380,9 +361,8 @@ def _camera_turn_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
-# "I'll need to see your screen" while computer.observe is granted is a false
-# inability claim: voice turn 9548f263c5b1 (2026-10-19) answered a question about
-# what the owner was looking at with it, at its control line, and never looked.
+# A granted computer.observe capability must be tried before claiming that
+# the current screen cannot be inspected.
 _SCREEN_INABILITY = re.compile(
     r"\b(?:(?:need|have|would have) to|can(?:no|['’])?t|unable to|don['’]t have (?:access|a way) to)"
     r"\s+(?:see|view|look at|access|check)\b[^.!?]{0,40}?"
@@ -405,9 +385,7 @@ def _screen_claim_error(summary: str, context: dict) -> str | None:
     return None
 
 
-# A final reply that only promises a lookup ("I'll check the TV to see if the score is
-# visible") ends the turn without doing it: voice turn e9958d8a7066 (2026-10-19) said that
-# at its admission control line, called nothing, and the owner had to say "just look it up".
+# A final reply that only promises a lookup ends the turn without doing it.
 _PROMISED_ACTION = re.compile(
     r"^\W*(?:ok(?:ay)?[,.]?\s+|sure[,.]?\s+|alright[,.]?\s+)?"
     r"(?:I(?:['’]ll| will| am going to|['’]m going to)|let me)\s+"
@@ -417,6 +395,30 @@ _PROMISED_ACTION = re.compile(
 
 def _promised_action_error(summary: str, context: dict) -> str | None:
     """Reject a final reply that is only a promise to act, with no Tool call in this execution."""
+    objective = str(context.get("objective") or "")
+    if objective.lstrip().startswith("(You were cut off by "):
+        return None  # Speech continuation must not dispatch the interrupted action again.
+    lookup_request = re.search(r"\b(?:look\s+up|search)\b", objective, re.I)
+    lookup_promise = re.search(
+        r"\b(?:let me|lemme)\s+(?:look|check|search)\b|"
+        r"\bi(?:['’]m| am)\s+(?:still\s+)?(?:looking|searching|checking)\b", summary, re.I)
+    if lookup_request and lookup_promise:
+        for item in context.get("trace", []):
+            if not isinstance(item, dict) or item.get("interrupted") or item.get("not_dispatched"):
+                continue
+            if item.get("tool") in {"web.search", "web.fetch"}:
+                return None  # A real lookup, including its concrete failure, was attempted.
+            if item.get("tool") == "task.create":
+                try:
+                    receipt = json.loads(item.get("obs") or "{}")
+                except (TypeError, ValueError):
+                    continue
+                if isinstance(receipt, dict) and receipt.get("state") in {"started", "queued", "processed"}:
+                    return None  # An actual dispatched job owns the continuation.
+        return ("This final reply promises a lookup, but no web.search/web.fetch call or dispatched "
+                "research job exists in this execution. A final reply ends the turn; nothing keeps "
+                "looking afterward. Call web.search now for the requested lookup, then answer from "
+                "the result or report its concrete failure. Do not repeat a promise to look.")
     if not _PROMISED_ACTION.match(summary.strip()):
         return None
     if any(isinstance(item, dict) and item.get("tool") and item.get("tool") != "task.complete"
@@ -427,29 +429,33 @@ def _promised_action_error(summary: str, context: dict) -> str | None:
             "computer.observe or tv.control observe for what a screen shows), then answer from the result.")
 
 
-def _discord_playback_claim_error(summary: str, context: dict) -> str | None:
-    """A failed play/resume receipt cannot establish current playback."""
-    if context.get("_discord_control_failed") not in {"play", "resume", "continuous"}:
+# A playback claim requires a Tool that could start or observe playback.
+_PLAYBACK_CLAIM = re.compile(
+    r"(?:^|[.!?]\s+)(?:(?:ok(?:ay)?|sure|alright|done|yeah|yep|yes|uh|um|so|well|man)[,.!]?\s+){0,3}"
+    r"(?:i(?:['’]m| am)(?: now| currently| already)? (?:playing|putting on)\b"
+    r"|i(?:['’]ve| have)?(?: now| just| already| successfully)? "
+    r"(?:started (?:playing|playback|(?:the |your )?(?:music|song|track|video))|put on|queued)\b"
+    r"|(?:now )?playing\b"
+    r"|(?:the |your |that |this )?(?:music|song|track|video|it)(?: is|['’]s) (?:now |already )?playing\b)", re.I)
+_PLAYBACK_TOOLS = frozenset({
+    "application.launch", "computer.act", "computer.observe", "tv.control",
+})
+
+
+def _playback_claim_error(summary: str, context: dict) -> str | None:
+    """Reject a reported playback when no Tool in this execution could start or observe it."""
+    if any(isinstance(item, dict) and item.get("tool") in _PLAYBACK_TOOLS
+           and not (item.get("not_dispatched") or _refused_before_dispatch(item))
+           for item in context.get("trace", [])):
         return None
-    # Check clauses separately: an honest failure explanation must not mask a
-    # later positive claim. Negated, conditional and ordinary explanatory
-    # forms do not match these affirmative state statements.
-    for clause in re.split(r"[.!?;]\s+|\n+|\s*,?\s+but\s+", summary, flags=re.I):
-        clause = clause.strip()
-        if re.match(r"(?:now\s+)?(?:playing|starting|resuming|resumed)\b", clause, re.I):
-            if not re.search(r"\b(?:not|never|failed|fails|unsuccessful|unverified|uncertain|unable|cannot|"
-                             r"can['’]t|couldn['’]t|didn['’]t|requires?|needs?|depends?|would|could|might)\b",
-                             clause, re.I):
-                return "Discord playback failed or is uncertain. Report the actual blocker; do not claim playback started or resumed."
-        if re.match(
-                r"(?:i(?:['’]m| am) (?:now |already )?(?:playing|resuming)"
-                r"|i(?:['’]ve| have)?(?: now| just)? (?:started|resumed) (?:playing|playback|(?:the |your )?(?:music|song|track|audio))"
-                r"|(?:the |your )?(?:music|song|track|audio|playback) "
-                r"(?:is (?:now |already )?playing|has (?:now )?(?:started playing|resumed playback)"
-                r"|(?:started|resumed)(?=\s*[.!?,:]?\s*$))"
-                r"|it(?:['’]s| is) (?:now |already )?playing)\b",
-                clause, re.I):
-            return "Discord playback failed or is uncertain. Report the actual blocker; do not claim playback started or resumed."
+    for claim in _PLAYBACK_CLAIM.finditer(summary):
+        sentence = re.split(r"[.!?]", summary[claim.start():].lstrip(".!? "), maxsplit=1)[0]
+        if not _RECAP.search(sentence):
+            return ("No Tool call in this execution started or observed playback, so nothing is playing. "
+                    "Do not report playing. If the owner asks for music or video, call media.library search "
+                    "now and play the matching result. When the current request only adds a detail to your "
+                    "preceding request (an artist, a version, “wrong song”), search the preceding request's "
+                    "title together with that detail. Otherwise answer without claiming playback.")
     return None
 
 
@@ -467,12 +473,8 @@ def public_claim_error(summary: str, context: dict) -> str | None:
             r"\b(?:successfully|started playing|is (?:now )?playing)\b", summary, re.I) and not re.search(
             r"\b(?:cannot|can't|couldn't|unable|unverified|uncertain|not verified)\b", summary, re.I):
         return "TV verification failed. State that the requested outcome could not be verified; do not report unqualified playback success."
-    if context.get("_discord_admin_failed") and re.search(
-            r"(?:^|[.!?]\s+)(?:I(?:['’]ve| have)?(?: now| just| successfully)? (?:kicked|removed)\b|"
-            r"[^.!?]{1,100} (?:was|has been|is now) (?:kicked|removed)\b)", summary, re.I):
-        return "The server kick failed or is uncertain. Report the actual receipt without claiming removal."
-    return (_discord_playback_claim_error(summary, context)
-            or _unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+    return (_unlock_claim_error(summary, context) or _effect_claim_error(summary, context)
+            or _playback_claim_error(summary, context)
             or _camera_turn_claim_error(summary, context) or _screen_claim_error(summary, context)
             or _promised_action_error(summary, context))
 
@@ -552,10 +554,6 @@ def _computer_completion_error(task, status: str, context: dict, verification=No
     """
     if context.get("_tv_control_failed") and status != "failed":
         return "TV control failed in this run; finish with status failed and the actual blocker."
-    if context.get("_discord_control_failed") and status != "failed":
-        return "Discord control failed or is uncertain in this run; finish failed with its actual receipt and do not replay."
-    if context.get("_discord_admin_failed") and status != "failed":
-        return "The server kick failed or is uncertain; finish failed with its actual receipt and do not replay."
     if context.get("_media_acquire_failed") and status != "failed":
         return "Media registration failed or is uncertain; finish failed with its receipt and do not replay."
     if status != "completed":

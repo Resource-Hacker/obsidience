@@ -608,6 +608,8 @@ def _pc_state(state):
         foreground['app'] = PC_APP
         state['pc'] = pc
         playback = pc['playback'] if pc and pc['playback'] != 'idle' else None
+        if pc and isinstance(pc.get('mirror'), dict):
+            playback = 'playing' if pc['mirror'].get('status') == 'active' else None
         # A commercial break is the channel playing: the tuner skips the advertisements behind its card.
         state['playback'] = 'playing' if playback in ('break', 'playing_verified') else playback
         if playback == 'break':
@@ -1018,6 +1020,11 @@ def _reach_pc(row, cancel, context, power, action, tv):
     pc, opened = tv['pc'], tv.get('last_opened') or {}
     if pc is None:
         raise ValueError('The PC player does not answer')
+    if pc.get('mirror') is not None:
+        return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
+                'correction_allowed': True,
+                'failure': 'This mirrors the live USB-C screen. Pause or resume in the source browser; '
+                           'TV mute controls sound, and stop ends the mirror.'}
     if pc.get('provider') == 'local':
         return _vod({'operation': action, 'generation': pc.get('generation'),
                      'source': pc.get('source')}, context, cancel)
@@ -1506,8 +1513,83 @@ def _play_library(prepared, context, row, cancel):
             'library': {key: value for key, value in prepared.items() if key not in ('status', 'id')}}
 
 
+def _mirror_screen(context, row, cancel):
+    """Use the existing TV route and tuner to mirror the authorized USB-C Surface."""
+    current = _player.state() or {}
+    if current.get('mirror_supported') is not True:
+        raise ValueError('The TV tuner does not support screen mirroring yet')
+    applied = False
+    try:
+        raw, _boot, _ad = _preamble(row, cancel, _POWER_READ, timeout=4)
+    except OSError as error:
+        if isinstance(error, InterruptedError):
+            raise
+        context['_tv_effect_uncertain'] = True
+        if row.get('mac'):
+            applied = True
+            raw, _boot, _ad = _after_wake(row, cancel, _POWER_READ)
+        else:
+            _drop_offline(row)
+            adb.run(row, cancel, connect=True, timeout=4)
+            raw, _boot, _ad = _preamble(row, cancel, _POWER_READ)
+    if _parse_power(raw) != {'wakefulness': 'Awake', 'display': 'ON'}:
+        context['_tv_effect_uncertain'] = True
+        applied = True
+        _end_screensaver(row, cancel, limit=8.)
+    # This route returns before the ordinary remote-control preamble below.
+    # Acquire its existing readback owner too, including on the first TV call.
+    if _agent.session(row, cancel, _boot, _pushed(row)) is None:
+        raise ValueError('The TV screen readback agent is unavailable; no mirror command was sent')
+    previous = _show('status')
+    if previous not in ('player', 'android'):
+        raise ValueError('The TV session source is unavailable')
+    android = _android.state()
+    if previous == 'android' and android is None:
+        raise ValueError('Cannot verify the Android source before switching')
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('TV mirror cancelled before source dispatch')
+    context['_tv_effect_uncertain'] = True
+    if android and android.get('playback') != 'idle':
+        applied = True
+        if not _android.stop():
+            raise ValueError('The previous Android playback did not stop')
+    if previous != 'player':
+        applied = True
+        if _show('player') != 'player':
+            raise ValueError('The TV session did not select its player')
+    applied = _show_stream(row, cancel, context) or applied
+    context['_tv_effect_uncertain'] = True
+    current = _player.state() or {}
+    selected = current.get('mirror') or {}
+    if not (selected.get('surface') == 'usb-c' and selected.get('audio') == 'Microsoft Edge'
+            and selected.get('status') == 'active'):
+        applied = True
+        _player.mirror('usb-c', cancel)
+    if (_show('status') != 'player' or not _stream_shown(_window(row, cancel))
+            or _stream_unobstructed() is not True):
+        raise ValueError('The TV did not verify the PC stream after mirror selection')
+    current = _player.state() or {}
+    selected = current.get('mirror') or {}
+    if (selected.get('surface') != 'usb-c' or selected.get('audio') != 'Microsoft Edge'
+            or selected.get('status') != 'active'):
+        raise ValueError('The selected mirror no longer has fresh playback evidence')
+    context['_tv_effect_uncertain'] = False
+    context.pop('_tv_navigation_applied', None)
+    return {'status': 'completed', 'delivery': 'verified', 'action': 'mirror',
+            'effect_applied': applied, 'must_not_replay': True, 'route': 'pc',
+            'surface': 'usb-c', 'playback_started': True, 'pc': current,
+            'note': 'The USB-C picture and Microsoft Edge audio are advancing together in the TV stream. '
+                    'Physical picture and sound acceptance remain separate.'}
+
+
 def _stop_media(context, cancel):
     current = _player.state() or {}
+    if current.get('mirror') is not None:
+        context['_tv_effect_uncertain'] = True
+        result = _player.stop_mirror(cancel)
+        context['_tv_effect_uncertain'] = False
+        return {'status': 'completed', 'delivery': 'verified', 'action': 'stop',
+                'effect_applied': True, 'must_not_replay': True, 'pc': result}
     queued = current.get('queue')
     if isinstance(queued, dict) and queued.get('state') in ('waiting', 'resolving'):
         origin = queued.get('origin_generation')
@@ -1934,7 +2016,7 @@ def _record(args, result):
 
 
 def execute(args: dict, context: dict) -> dict:
-    timed = isinstance(args, dict) and args.get('action') in ('play', 'open', 'open_season')
+    timed = isinstance(args, dict) and args.get('action') in ('play', 'open', 'open_season', 'mirror')
     if timed:
         context['_tv_timings'] = {}
         started = time.monotonic()
@@ -1973,6 +2055,7 @@ def _execute(args, context):
         if type(start) is not int or not 0 <= start <= 86400:
             raise ValueError('start takes whole seconds 0-86400 for a YouTube video link')
     fields = {'on': [set()], 'off': [set()], 'observe': [set()], 'stop': [set()], 'launch': [{'app'}],
+              'mirror': [{'surface'}],
               'vod': [{'operation', 'generation', 'source'},
                       {'operation', 'generation', 'source', 'position'},
                       {'operation', 'generation', 'source', 'kind', 'track_id'}],
@@ -1982,6 +2065,8 @@ def _execute(args, context):
               **{target: [set()] for target in TARGETS if target != 'volume'}}
     if action not in fields or set(args) - {'action'} not in fields[action]:
         raise ValueError('Invalid TV action arguments')
+    if action == 'mirror' and args['surface'] != 'usb-c':
+        raise ValueError('TV mirror takes surface usb-c with Microsoft Edge playback audio')
     if action == 'open_season' and (not isinstance(args['id'], str)
             or not re.fullmatch(r's[0-9a-f]{6}', args['id'])):
         raise ValueError('open_season takes one exact current-activation season selection id')
@@ -2063,6 +2148,8 @@ def _execute(args, context):
             raise ValueError('App is not registered on this TV; observe to list apps')
         if action != 'observe' and uncertain_before:
             raise ValueError('An earlier TV effect is uncertain; stop effects and report it')
+        if action == 'mirror':
+            return _mirror_screen(context, row, cancel)
         if action == 'stop':
             return _stop_media(context, cancel)
         if action == 'vod':

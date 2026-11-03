@@ -11,6 +11,7 @@ Wants=obsidience-shell-knowledge.service
 Wants=obsidience-shell-agent-canvas.service
 Wants=obsidience-shell-notifications.service
 Wants=obsidience-shell-window-adapter.service
+Wants=obsidience-shell-game-mode.service
 Wants=obsidience-shell-screen-replay@samsung.service
 Wants=obsidience-shell-screen-replay@dp-4.service
 Wants=obsidience-shell-screen-replay@usb-c.service

@@ -1,7 +1,7 @@
 ---
 type: tool
 title: tv.control
-description: 'Control the registered TV as an optional Media playback destination.
+description: 'Control the registered TV as an optional Media playback destination. Mirror the USB-C bottom screen with action mirror, surface usb-c and its Edge audio.
   For an explicit library source use media.library select then open its returned current-activation
   id; catalogue GUIDs are not open ids. For an explicit season request use media.library
   season, then open_season with its fresh id. The tuner owns only that finite same-season
@@ -76,8 +76,9 @@ obsidience:
   source: obsidience/harness/capabilities/tv/control.py
   owner_maintained: true
 ---
-
 ## Runtime
+
+To mirror the game or video already playing on the USB-C bottom screen, make one native `tv.control` call with `{"action":"mirror","surface":"usb-c"}`. This sends the entire USB-C screen and Microsoft Edge playback audio together to the registered TV, waking it if needed. It does not need a browser URL or a programme search. Do not pass the game title to `play` or speak a Tool invocation as ordinary text. Report success only with verified mirror playback. `stop` ends mirroring; pause or resume the source in Edge. TV volume and mute still work. A fresh observation is needed to name what is actually showing.
 
 `open_season` takes one fresh `id` from `media.library season`. It uses the same
 exact-source admission and TV verification as library `open`, with a finite

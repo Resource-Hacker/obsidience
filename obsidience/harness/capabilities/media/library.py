@@ -67,7 +67,7 @@ def bind_music(row: dict, context: dict, config: dict) -> dict:
         context.setdefault('_media_music_artists', {})[candidate_id] = artist
     return {**row, 'id': candidate_id,
             'delivery': music['delivery'] if row['provider'] == 'youtube' else 'direct',
-            # Desk playback opens this in Edge; Discord plays the id instead.
+            # Desk playback opens this in Edge.
             **({'url': 'https://www.youtube.com/watch?v=' + binding['video_id']}
                if row['provider'] == 'youtube' and binding.get('video_id') else {})}
 
@@ -124,11 +124,8 @@ async def find_music(query: str, context: dict) -> dict:
             candidates.append(bind_music(row, context, config))
     return {'status': 'completed', 'query': query, 'candidates': candidates,
             'local_catalogue': local_status, 'online_music_enabled': bool(music.get('enabled')),
-            'note': ('These are music selections ready for discord.control play(id,media_kind:audio) in this turn. '
-                     if context.get('_discord') else
-                     'To play a song at the desk, open the chosen candidate url in Edge with application.launch '
-                     '(application:microsoft_edge). Use discord.control play(id,media_kind:audio) only when the owner '
-                     'explicitly asks for Discord or Bard; Discord music is otherwise Bard\'s role. ') +
+            'note': ('To play a song at the desk, open the chosen candidate url in Edge with application.launch '
+                     '(application:microsoft_edge). ') +
                     'Match the whole requested artist before preferring Official Audio labels; a verified uploader is not necessarily that performer. '
                     'artist_match:close is only a likely spelling match to a returned artist, not proof; clarify if the intended artist is uncertain. '
                     'For an artist-only play request choose a matching official or relevant top track; '
@@ -158,16 +155,6 @@ async def execute(args: dict, context: dict) -> dict:
             from .acquire import status
             return {'status': 'completed', 'acquisition': await status()}
         if action == 'resume' and set(args) == {'action', 'item_id'}:
-            if context.get('_discord'):
-                from ...media.jellyfin import catalogue_id
-                try:
-                    catalogue_id(args['item_id'])
-                except MediaUnavailable:
-                    return {'status': 'failed', 'delivery': 'not_dispatched', 'effect_applied': False,
-                            'correction_allowed': True,
-                            'failure': 'media.library resume only reads saved Jellyfin progress for a catalogue UUID. '
-                                'To continue paused Discord audio, call discord.control with {"action":"resume"} '
-                                'once and no id. Do not recall an old id, search, select or replay a track.'}
             return {'status': 'completed', **await asyncio.to_thread(service.catalogue().resume, args['item_id'])}
         if action == 'browse' and not set(args) - {'action', 'query', 'offset', 'limit'}:
             page = await asyncio.to_thread(service.catalogue().browse, query=args.get('query', ''),

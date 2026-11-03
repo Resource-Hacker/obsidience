@@ -235,29 +235,35 @@ async def prepare(conversation, text: str, response_contract: str, *, idle: bool
                 # Only the selected conversation's pending utterance matters.
                 _PREPARED.clear()
                 _PREPARED[conversation_id] = record
-            async with llm.provider_client() as client:
-                capacity = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-                if not spec.supports_input_token_limit:
-                    tokens = await count_payload(payload, spec, client)
-                    if tokens > capacity:
-                        return {"status": "context_pressure"}
-                # b10078 emits one token even for n_predict=0. Bound that work
-                # explicitly; this caller has no output, Tool or persistence port.
-                payload.update(max_tokens=1, stream=False,
-                               **model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_SLOT))
-                payload.pop("stream_options", None)
-                projection = TaskContext()
-                try:
-                    # One bounded JSON response; share the exact admission guard
-                    # without consuming events or exposing the discarded token.
-                    async with admitted_events(client, payload, spec, projection, capacity, {}) as events:
-                        await events.response.aread()
-                        usage = events.response.json().get("usage") or {}
-                    if spec.supports_input_token_limit:
-                        tokens = projection.last_projection["input_tokens"]
-                except ContextBudgetExceeded:
-                    return {"status": "context_pressure"}
-                if record is not None:
-                    record["completed"] = True
-                return {"status": "prepared", "prompt_tokens": tokens,
-                        "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}
+            result = await _warm(payload, spec, model_runtime.EXECUTIVE_LANE)
+            if record is not None and result["status"] == "prepared":
+                record["completed"] = True
+            return result
+
+
+async def _warm(payload: dict, spec, lane: str) -> dict:
+    """Send one prefix-only request pinned to ``lane``'s slot; the engine keeps the evaluated prefix."""
+    async with llm.provider_client() as client:
+        capacity = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
+        tokens = 0
+        if not spec.supports_input_token_limit:
+            tokens = await count_payload(payload, spec, client)
+            if tokens > capacity:
+                return {"status": "context_pressure"}
+        # b10078 emits one token even for n_predict=0. Bound that work
+        # explicitly; this caller has no output, Tool or persistence port.
+        payload.update(max_tokens=1, stream=False, **model_runtime.slot_fields(spec, lane))
+        payload.pop("stream_options", None)
+        projection = TaskContext()
+        try:
+            # One bounded JSON response; share the exact admission guard
+            # without consuming events or exposing the discarded token.
+            async with admitted_events(client, payload, spec, projection, capacity, {}) as events:
+                await events.response.aread()
+                usage = events.response.json().get("usage") or {}
+            if spec.supports_input_token_limit:
+                tokens = projection.last_projection["input_tokens"]
+        except ContextBudgetExceeded:
+            return {"status": "context_pressure"}
+        return {"status": "prepared", "prompt_tokens": tokens,
+                "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)}

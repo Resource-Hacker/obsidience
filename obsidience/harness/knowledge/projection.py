@@ -42,7 +42,6 @@ CHECKOUT_AGENTS = {
     "guardian": "Agents/Heimdall/Heimdall",
     "curator": "Agents/Alexandria/Alexandria",
     "researcher": "Agents/Darwin/Darwin",
-    "discord": "Agents/Discord/Discord",
 }
 # Agent registration and scene membership are separate presentation decisions.
 # Independent integrations remain readable/manageable without joining the
@@ -545,7 +544,9 @@ def _navigation_manifest(overrides: dict[str, Note]) -> dict:
         if group_id == "executive":
             subjects = [_navigation_subject(ref, parent, overrides) for ref, parent in executive_subjects]
         else:
-            name = identity_ref.split("/")[1]
+            # Use the Agent's own name for its presentation identity.
+            # subject ids. Identical to the folder for every one-Agent folder.
+            name = identity_ref.split("/")[-1]
             subjects = [_navigation_subject(f"@sat/{name}/{key}", None, overrides)
                         for key in ("tools", "skills", "runbooks", "tasks", "other-agents")]
         subjects = _scoped_knowledge_subjects(identity, notes, subjects, overrides)

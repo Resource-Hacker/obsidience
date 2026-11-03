@@ -454,3 +454,20 @@ idle before success. Generic pause/resume reject local files until the VOD
 control slice supplies identity-bound controls. Existing channel and Android
 transport paths are preserved. Restart the tuner/player only through the guarded
 deployer at an idle boundary; never restart this compositor for a media change.
+
+## Explicit desktop mirroring
+
+`tv.control` with `action:mirror, surface:usb-c` selects the bottom USB-C screen
+with Microsoft Edge playback audio. The existing tuner owns `mirror-view`, using
+one HEVC/Opus container at 1920x1200 and 30 fps, played with audio-clock sync in
+the private TV session. No URL search or application relaunch is needed.
+
+The tuner advertises `mirror_supported` and exposes the selected `mirror` with
+status `waiting_client`, `starting`, `active` or `failed`. Active means fresh
+advancing player time with video and audio parameters; it is not physical TV
+acceptance. Capture stops when Moonlight disconnects and resumes for the still
+selected mirror when it reconnects. `stop` or replacement playback releases the
+owned presenter before returning. Ordinary idle/commercial presentation still
+uses the silent `break-view`; do not replace it with an audio mirror override.
+Pause the source browser to pause mirrored content. The mirror captures Edge
+playback only and has no microphone or default-source fallback.

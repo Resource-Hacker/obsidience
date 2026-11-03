@@ -258,10 +258,8 @@ API, independently of the cached-only movie/series torrent policy. A play reques
 reuses an exact existing item or submits it once. Uncached preparation can be pending;
 there is no hidden autoplay scheduler, P2P fallback or account change.
 
-Discord consumes the selection through its existing media player. Provider URLs
-remain private and short-lived; the Node-owned child streams bytes with backpressure
-to FFmpeg, with no complete local download. Each playback owns a private temporary
-workspace for native HLS fragments. External downloader fallback is disabled so
-signed URLs cannot enter child command arguments. Stop/cancel/leave reap the
-provider and decoder before removing the workspace. Channel-limited Opus delivery is not lossless. Video resolution is not an
-audio quality measure; this route does not implement bot video/Go Live.
+Source discovery and playback are separate contracts. Public source selections
+require a configured destination with its own delivery, cancellation and completion
+checks. Provider URLs remain private and short-lived and must not enter model
+context, logs or child command arguments. This snapshot has no Discord bot
+playback destination.

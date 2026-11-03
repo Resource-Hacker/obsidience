@@ -73,7 +73,6 @@ side talks to it through bounded JSON events.
 | `harness/realtime/speech/worker.py` | The speech worker: Pipecat pipeline, NeMo ASR and turn taking, Silero VAD, the Smart Turn gate, Pocket TTS, echo reference |
 | `harness/realtime/speech/wakeword.py` | The microWakeWord adapter |
 | `harness/realtime/speech/cues.py` | Installation audio cues as Pipecat frames |
-| `harness/realtime/speech/discord.py` | Discord voice members as a Pipecat input transport (shared models, per-member state) |
 | `harness/realtime/speech/nemo-stt-playback.patch` | The local NeMo patch: blocking transcription off the audio loop, one lock for streaming cache, VAD reset and model replacement, cancellation that drains native work |
 | `harness/requirements-speech.txt` | The worker environment |
 | `harness/realtime/runtime.py`, `harness/realtime/devices.py` | The Harness side: worker lifecycle, modes (wake word, realtime, mute), device selection, events to the conversation |

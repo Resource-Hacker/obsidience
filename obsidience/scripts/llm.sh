@@ -53,10 +53,12 @@ if [ "$GPU_COUNT" -gt 1 ]; then
     export NCCL_P2P_DISABLE=1 GGML_CUDA_ALLREDUCE=hybrid
   fi
 fi
-# Several slots (2026-10-19): the Harness pins the Executive conversation, Bard and background
-# work to their own slot with id_slot (models/runtime.py slot_fields), so an Audit trial no longer
-# swaps the Executive's prefix out to --cache-ram or evicts it. Without --kv-unified -c is divided
-# across slots, so each slot gets the full context (the admission guard rejects a limit above it).
+# Every running lane (the Executive conversation, background work and trials)
+# leases its own slot and is pinned to it
+# with id_slot (models/runtime.py slot leases, 2026-10-29); the Harness writes max_num_seqs = the
+# lane count and relaunches this service when it changes, so an Audit trial no
+# longer swaps a prefix out to --cache-ram or evicts it. Without --kv-unified -c is divided across
+# slots, so each slot gets the full context (the admission guard rejects a limit above it).
 # A request launch would otherwise copy every idle slot into --cache-ram (~0.9-1.9 GiB, 0.25-0.4 s
 # on the server loop) although its KV stays in VRAM. The default --slot-prompt-similarity stays: tp9
 # leaves a busy pinned slot untouched (patch 13), and the Task slot keeps swapping Task prefixes

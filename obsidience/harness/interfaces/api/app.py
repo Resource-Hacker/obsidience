@@ -26,7 +26,7 @@ from ...models import runtime as model_runtime
 from ...realtime import runtime as realtime
 from ...shell_port import scene as shell_scene
 from .routes import (
-    activity, applications, chat, checkouts, discord, discord_presentation, graphs, hardware, knowledge, lights, media, memory, models,
+    activity, applications, chat, checkouts, graphs, hardware, knowledge, lights, media, memory, models,
     optimizations, realtime as realtime_routes, reviews, shell, sources, status, system, tasks, turns,
 )
 
@@ -74,8 +74,8 @@ async def lifespan(app: FastAPI):
         await conversation_log.start()
         resources.push_async_callback(conversation_log.stop)
         await conversation_log.reconcile(CONVERSATION)
-        await discord.start()
-        resources.push_async_callback(discord.close)
+        # Lease the core conversation and background model lanes.
+        model_runtime.RUNTIME.open_lanes()
         resources.push_async_callback(shell_scene.SCENE.stop)
         shell_scene.SCENE.start()
         intake = SourceIntake()
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Obsidience", lifespan=lifespan)
-for resource in (memory, graphs, media, lights, discord, discord_presentation, shell, status, models, hardware, system, applications,
+for resource in (memory, graphs, media, lights, shell, status, models, hardware, system, applications,
                  realtime_routes, knowledge, sources, checkouts, reviews, optimizations, turns, tasks,
                  activity, chat):
     app.include_router(resource.router)

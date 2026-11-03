@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from contextvars import ContextVar
 
 from google.adk.events import Event
 from google.genai import types
@@ -34,23 +33,13 @@ _LIVE_KINDS = {'plugin:obsidience.context', 'plugin:obsidience.memory'}
 _service = None
 # (conversation, window anchor) -> timestamp of the anchor's first log event.
 _floors: dict[tuple[str, str], float] = {}
-# Set only by the trusted named-Agent ingress wrapper, never by model params.
-CONVERSATION_BINDING: ContextVar[object | None] = ContextVar('obsidience_conversation_binding', default=None)
-
-
-def binding(conversation_id):
-    value = CONVERSATION_BINDING.get()
-    return value if value is not None and value.conversation_id == conversation_id else None
-
 
 def user_id(conversation_id):
-    value = binding(conversation_id)
-    return value.user_id if value is not None else USER
+    return USER
 
 
 def agent_id(conversation_id):
-    value = binding(conversation_id)
-    return value.agent_name if value is not None else AGENT
+    return AGENT
 
 
 _views: dict[str, dict] = {}
@@ -269,28 +258,17 @@ async def open_session(conversation_id: str, turn_id: str | None):
     if turn_id is None:
         return session
     from ...knowledge.index import INDEX
-    external = binding(conversation_id)
-    if external is not None:
-        current = external.validate()
-        if turn_id != external.turn_id:
-            raise ValueError('Native named-Agent turn binding changed')
-        turns = external.history()
-    else:
-        current = INDEX.conversation_turn(turn_id)
+    current = INDEX.conversation_turn(turn_id)
     if not current or current['conversation_id'] != conversation_id:
         raise ValueError('Native conversation requires an exact admitted owner turn')
-    if external is None:
-        turns = INDEX.conversation_turns(conversation_id, before_sequence=current['sequence'])
-    if external is None and await window_floor(conversation_id) is not None:
+    turns = INDEX.conversation_turns(conversation_id, before_sequence=current['sequence'])
+    if await window_floor(conversation_id) is not None:
         # The log was loaded from the window's anchor; earlier turns are already in it.
         # Without the anchor's ledger row nothing can be placed safely: seed nothing.
         first = INDEX.conversation_turn(window_anchor(conversation_id))
         floor_sequence = (first['sequence'] if first and first['conversation_id'] == conversation_id
                           else current['sequence'])
         turns = [turn for turn in turns if turn['sequence'] >= floor_sequence]
-    if external is not None:
-        await close_interrupted_calls(conversation_id, 'named-agent-recovery')
-        session = await store.get_session(app_name=APP, user_id=user_id(conversation_id), session_id=conversation_id)
     known = known_turns(session)
     replies = {turn['reply_to']: turn for turn in turns if turn['role'] == 'assistant'}
     for turn in turns:
@@ -318,158 +296,6 @@ def _receipt_object(value):
         except ValueError:
             return None
     return value if isinstance(value, dict) else None
-
-
-def previous_discord_music_choices(session):
-    """Latest search choices in this member's recent native conversation.
-
-    Public source identities are evidence, not reusable selection grants. A new
-    search replaces them; an attempted playback consumes them. Read no dialogue
-    as source authority and never cross the bound session or its recent turns.
-    """
-    current = binding(session.id)
-    if current is None or session.user_id != current.user_id or current.agent_name != 'discord':
-        return []
-    events = session.events[-256:]
-    turns = set()
-    floor = 0
-    for index in range(len(events) - 1, -1, -1):
-        event = events[index]
-        for value in (event.content.parts if event.content and event.content.parts else []):
-            meta = _meta(value)
-            if event.author == 'user' and meta.get('source') in _TURN_KINDS and meta.get('id'):
-                turns.add(meta['id'])
-        if len(turns) > 4:
-            floor = index + 1
-            break
-    calls, candidates, pending_play = {}, [], set()
-    for event in events[floor:]:
-        for value in (event.content.parts if event.content and event.content.parts else []):
-            if event.author == current.agent_name:
-                if (call := value.function_call) is not None:
-                    calls[(event.invocation_id, call.id)] = (call.name, call.args or {})
-                    if call.name == 'media.library' and (call.args or {}).get('action') == 'search':
-                        candidates = []
-                        pending_play.clear()
-                    elif call.name == 'discord.control' and (call.args or {}).get('action') == 'play':
-                        pending_play.add((event.invocation_id, call.id))
-                response = value.function_response
-                if response is None or (call := calls.get((event.invocation_id, response.id))) is None:
-                    continue
-                name, args = call
-                receipt = _receipt_object(response.response)
-                if response.name != name or receipt is None:
-                    continue
-                if (name == 'media.library' and args.get('action') == 'search'
-                        and args.get('type') == 'music' and receipt.get('status') == 'completed'):
-                    candidates = receipt.get('candidates', [])
-                elif name == 'discord.control' and args.get('action') == 'play':
-                    pending_play.discard((event.invocation_id, response.id))
-                    if not (receipt.get('delivery') == 'not_dispatched' and receipt.get('effect_applied') is False):
-                        candidates = []
-            elif event.author == 'user':
-                meta = _meta(value)
-                if meta.get('source') not in {'plugin:obsidience.context', 'plugin:obsidience.command-outcome'}:
-                    continue
-                receipt = _receipt_object(value.text)
-                if receipt is None:
-                    continue
-                if meta['source'] == 'plugin:obsidience.context':
-                    args = receipt.get('search_arguments') or {}
-                    page = receipt.get('search_result') or {}
-                    if args.get('action') == 'search' and args.get('type') == 'music':
-                        candidates = page.get('candidates', []) if page.get('status') == 'completed' else []
-                        pending_play.clear()
-                elif receipt.get('run_id') == meta.get('run'):
-                    command = receipt.get('command') or {}
-                    if (command.get('declined_music') is True or command.get('name') == 'discord.control'
-                            and (command.get('args') or {}).get('action') == 'play'):
-                        candidates = []
-    # Missing/cross-invocation recovery responses mean outcome unknown, not an
-    # unused choice. Never resurrect a selection after an interrupted effect.
-    return [] if pending_play else [dict(row) for row in candidates[:40] if isinstance(row, dict)]
-
-
-def previous_discord_music_artist(session):
-    """Last successfully admitted artist in this bound session, never dialogue.
-
-    This is historical selection evidence for an explicit continuation request,
-    not a preference, permission or claim of current playback. Read only the
-    bounded native window; an older/missing receipt requires clarification.
-    """
-    current = binding(session.id)
-    if current is None or session.user_id != current.user_id:
-        return None
-    calls, candidates, artist = {}, {}, None
-
-    def successful(receipt):
-        return (isinstance(receipt, dict) and receipt.get('ok') is True
-                and receipt.get('status') == 'completed' and not receipt.get('must_not_replay')
-                and receipt.get('delivery') in {'audio_playback_ready', 'audio_playback_started'})
-
-    def named(value):
-        return (isinstance(value, str) and 0 < len(value.strip()) <= 80
-                and not any(ord(char) < 32 for char in value))
-
-    for event in session.events[-256:]:
-        parts = event.content.parts if event.content and event.content.parts else []
-        for value in parts:
-            if event.author == current.agent_name:
-                if (call := value.function_call) is not None:
-                    calls[call.id] = (call.name, call.args or {})
-                response = value.function_response
-                if response is not None and response.id in calls:
-                    name, args = calls[response.id]
-                    if response.name != name or (receipt := _receipt_object(response.response)) is None:
-                        continue
-                    if (name == 'media.library' and args.get('action') == 'search'
-                            and args.get('type') == 'music' and receipt.get('status') == 'completed'):
-                        candidates.update({(event.invocation_id, row['id']): row for row in receipt.get('candidates', [])
-                                           if isinstance(row, dict) and isinstance(row.get('id'), str)})
-                    elif name == 'discord.control' and args.get('action') == 'play' and successful(receipt):
-                        artist = None
-                        row = candidates.get((event.invocation_id, args.get('id')), {})
-                        if (row.get('provider') == 'youtube' and named(row.get('artist'))
-                                and isinstance(row.get('video_id'), str)
-                                and receipt.get('item_id') == 'youtube:' + row['video_id']
-                                and receipt.get('title') == row.get('title')):
-                            artist = row['artist'].strip()
-            elif event.author == 'user' and _meta(value).get('source') == 'plugin:obsidience.context':
-                context = _receipt_object(value.text)
-                if context is None:
-                    continue
-                rows = context.get('followup_music_choices')
-                if not isinstance(rows, list):
-                    args = context.get('search_arguments') or {}
-                    page = context.get('search_result') or {}
-                    rows = (page.get('candidates') if isinstance(args, dict) and isinstance(page, dict)
-                            and args.get('action') == 'search' and args.get('type') == 'music'
-                            and page.get('status') == 'completed' else None)
-                if isinstance(rows, list):
-                    candidates.update({(event.invocation_id, row['id']): row for row in rows
-                                       if isinstance(row, dict) and isinstance(row.get('id'), str)})
-            elif event.author == 'user' and _meta(value).get('source') == 'plugin:obsidience.command-outcome':
-                try:
-                    outcome = json.loads(value.text or '')
-                except ValueError:
-                    continue
-                if not isinstance(outcome, dict) or outcome.get('run_id') != _meta(value).get('run'):
-                    continue
-                command = outcome.get('command') or {}
-                if not isinstance(command, dict):
-                    continue
-                identity = command.get('music_identity') or {}
-                if not isinstance(identity, dict) or not isinstance(command.get('args'), dict):
-                    continue
-                receipt = _receipt_object(outcome.get('result'))
-                if (outcome.get('status') == 'completed' and command.get('name') == 'discord.control'
-                        and command['args'].get('action') == 'play' and successful(receipt)):
-                    artist = None
-                    if (named(identity.get('artist')) and receipt.get('title') == identity.get('title')
-                            and isinstance(receipt.get('item_id'), str)
-                            and receipt['item_id'].startswith('youtube:')):
-                        artist = identity['artist'].strip()
-    return artist
 
 
 async def close_interrupted_calls(conversation_id: str, invocation_id: str) -> None:

@@ -21,3 +21,18 @@ out/
 # Documentation site build output and plugin cache (mkdocs.yml)
 /site/
 /.cache/
+
+# Discord bot experiments remain local and are excluded from this distribution.
+/obsidience/discord/
+/obsidience/harness/discord/
+/obsidience/harness/capabilities/discord/
+/obsidience/harness/interfaces/api/routes/discord.py
+/obsidience/harness/interfaces/api/routes/discord_presentation.py
+/obsidience/harness/realtime/speech/discord.py
+/obsidience/ui/src/renderer/src/surfaces/discord.tsx
+/obsidience/scripts/discord-persona*
+/obsidience/scripts/persona-eval/
+/obsidience/scripts/stream-knowledge
+/obsidience/defaults/vault/Agents/Discord/
+/obsidience/defaults/vault/Skills/discord.*.md
+/obsidience/defaults/vault/Tools/discord.*.md

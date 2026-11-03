@@ -166,7 +166,7 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
         reasoning_effort=effort, response_schema=response_schema,
     )
     # Controller replies (Harness2/AutoSaddler sessions) are background work: the Task slot.
-    payload.update(model_runtime.slot_fields(spec, model_runtime.TASK_SLOT))
+    payload.update(model_runtime.slot_fields(spec, model_runtime.TASK_LANE))
     from .context import PROMPT_SAFETY_TOKENS, TaskContext
 
     async with provider_client() as client:
@@ -192,6 +192,17 @@ async def chat(messages: list[dict], max_tokens: int | None = None,
             context_projection=dict(projection.last_projection),
             provider_metrics=metrics,
         )
+
+
+async def plain_reply(payload: dict, spec: ModelSpec, metrics: dict | None = None) -> str:
+    """One caller-built streaming chat request's public text through the API pool.
+
+    For bounded background requests outside a Task or conversation;
+    the caller sets its slot, cap and template switches.
+    """
+    async with provider_client() as client:
+        content, _finish, _tokens = await _stream_reply(client, payload, spec, metrics, measurements=False)
+    return content
 
 
 async def _stream_reply(client: httpx.AsyncClient, payload: dict,
@@ -226,6 +237,9 @@ async def _stream_reply(client: httpx.AsyncClient, payload: dict,
                     tokens = usage.get("completion_tokens")
                     if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
                         completion_tokens = tokens
+                    prompt = usage.get("prompt_tokens")
+                    if isinstance(prompt, int) and not isinstance(prompt, bool) and prompt >= 0:
+                        metrics["prompt_tokens"] = prompt
                     detail = usage.get("prompt_tokens_details")
                     if isinstance(detail, dict):
                         cached = detail.get("cached_tokens")

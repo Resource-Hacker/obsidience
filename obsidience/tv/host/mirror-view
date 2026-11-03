@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+# Tuner-owned explicit mirror: exact USB-C Surface plus Edge playback.
+# The existing tuner owns this process group and ends it when TV media is loaded.
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
+[ "$#" -eq 1 ] || exit 2
+[ "$1" = "$XDG_RUNTIME_DIR/obsidience-tv/explicit-mirror.sock" ] || exit 2
+RECORDER=/var/lib/ai/opt/gpu-screen-recorder-6.1.2-static/bin/gpu-screen-recorder
+SCREEN=$(cd "$ROOT" && PYTHONPATH="$ROOT" /usr/bin/python -m obsidience.shell.surface_identity usb-c)
+display=$(cat "$XDG_RUNTIME_DIR/obsidience-tv/wayland")
+# 2026-10-28: capture fixed at 1920x1200 in every TV mode (the iGPU that captures DP-2 is saturated).
+# Both tracks enter one timestamped container; no microphone or default capture source.
+"$RECORDER" -w "$SCREEN" -s 1920x1200 -c mkv -k hevc -f 30 -fm cfr \
+    -cursor no -keyint 1 -a 'app:Microsoft Edge' -ac opus -ab 192 |
+    PIPEWIRE_RUNTIME_DIR="$XDG_RUNTIME_DIR/obsidience-tv" WAYLAND_DISPLAY="$display" \
+    /usr/bin/mpv --no-config --load-scripts=no --ytdl=no --no-input-terminal \
+        --msg-level=all=warn --ao=pipewire --audio-device=pipewire/obsidience_tv \
+        --osc=no --input-default-bindings=no --fs --wayland-app-id=obsidience-tv-break \
+        --vulkan-device="$TV_VULKAN_DEVICE" --profile=low-latency --video-sync=audio \
+        --vd-lavc-threads=4 --panscan=0 --osd-level=0 --no-osd-bar --input-ipc-server="$1" -

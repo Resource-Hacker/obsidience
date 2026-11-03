@@ -1,0 +1,16 @@
+[Unit]
+Description=Obsidience automatic desktop game detection
+After=wayland-session@Hyprland.target
+PartOf=obsidience-shell-session.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python %h/Projects/obsidience/obsidience/shell/session/game-mode
+# Set in a local drop-in to admit Battle.net installations (Steam needs none):
+# Environment="OBSIDIENCE_BATTLENET_ROOTS=/srv/games:/opt/games"
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=5
+UMask=0077

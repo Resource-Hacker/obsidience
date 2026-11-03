@@ -14,6 +14,7 @@ reply per request, {"ok": true, "state": {...}} or {"ok": false, "error": "..."}
   {"op": "play", "provider": "pluto", "channel": "<24 hex digits>", "title": "...", "wait": seconds}
   {"op": "play", "url": "https://...", "title": "...", "wait": seconds}
   {"op": "play", "provider": "local", <exact private catalogue source>, "title": "...", "wait": seconds}
+  {"op": "mirror", "surface": "usb-c"}
   {"op": "pause"}  {"op": "resume"}  {"op": "stop"}  {"op": "state"}
 play replaces whatever plays and answers once the new play left `loading` (its first picture, a
 break it was tuned into, or failed), or after `wait` seconds (0 when absent). state: playback
@@ -92,6 +93,24 @@ VOD_LIMIT = 5.0
 START_TOLERANCE = 5.0
 START_LIMIT = 30.0  # An owned resume verifier waits this long for its first picture.
 
+
+
+# The TV is on only while a Moonlight client is connected to its Sunshine server.
+# Stop idle/break rendering when no client is watching. Sunshine logs every client
+# connect/disconnect; the last one decides.
+SUNSHINE_LOG = os.path.expanduser('~/.config/sunshine/sunshine.log')
+_CLIENT = re.compile(rb'CLIENT (CONNECTED|DISCONNECTED)')
+
+
+def tv_watching() -> bool:
+    try:
+        with open(SUNSHINE_LOG, 'rb') as log:
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - 262144))
+            found = _CLIENT.findall(log.read())
+    except OSError:
+        return True  # Unknown: keep the views as before.
+    return bool(found) and found[-1] == b'CONNECTED'
 
 class _Fault(Exception):
     """Why one attempt to play a channel ended, in words that never hold an address."""
@@ -426,6 +445,11 @@ class Tuner:
         self.resolving = threading.Lock()
         self.plugins = {}
         self.play = None
+        self.mirror = None
+        self.mirror_observed = 0.0
+        self.mirror_process = None  # Published/cleared under lock with presenter acquisition/teardown.
+        self.mirror_view = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mirror-view')
+        self.mirror_socket = os.path.join(directory, 'explicit-mirror.sock')
         self.plays = 0
         self.properties = {}
         self.entry = None  # The playlist entry the player started last.
@@ -486,7 +510,12 @@ class Tuner:
                  'video': size if play is not None and play.phase == 'playing'
                  and all(isinstance(side, int) for side in size) else None,
                  'since': round(self.since, 1), 'player': reached,
-                 'local_queue_supported': True}
+                 'local_queue_supported': True, 'mirror_supported': True}
+        if self.mirror is not None:
+            state['mirror'] = dict(self.mirror)
+            if (state['mirror']['status'] == 'active'
+                    and time.monotonic() - self.mirror_observed > 2):
+                state['mirror']['status'] = 'starting'
         if play is not None and play.channel:
             state.update(provider=play.provider, channel=play.channel)
         if play is not None and play.local is not None:
@@ -822,14 +851,55 @@ class Tuner:
             elif reason == 'error':
                 play.phase, play.reason = 'failed', 'the player could not play this address'
 
-    def _present(self):
-        """Show the existing graph mirror while idle or in a commercial break.
+    def _end_presenter(self, view, mirror):
+        """Kill/reap before acknowledging explicit capture teardown (presenter thread only)."""
+        _end(view)
+        if mirror and view.poll() is not None:
+            try:
+                os.unlink(self.mirror_socket)
+            except FileNotFoundError:
+                pass
+            with self.lock:
+                if self.mirror_process is view:
+                    self.mirror_process = None
+                self.lock.notify_all()
 
-        One presenter owns the view. Loading, playing and paused content keep their
-        own picture; stop and finite EOF return to the idle graph without loading media.
-        The break card remains the fallback during advertisements.
-        """
+    def _mirror_picture(self):
+        """One bounded read of this presenter's private mpv socket; no capture or input."""
+        names = ('time-pos', 'video-params', 'audio-params', 'pause')
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            deadline = time.monotonic() + .4
+            sock.settimeout(.4)
+            sock.connect(self.mirror_socket)
+            sock.sendall(b''.join((json.dumps({'command': ['get_property', name],
+                                              'request_id': index}) + '\n').encode()
+                                  for index, name in enumerate(names)))
+            data, values = b'', {}
+            while len(values) < len(names):
+                sock.settimeout(max(.001, deadline - time.monotonic()))
+                chunk = sock.recv(16384)
+                if not chunk or len(data) + len(chunk) > 65536 or time.monotonic() > deadline:
+                    raise ValueError('mirror readback unavailable')
+                data += chunk
+                while b'\n' in data:
+                    line, data = data.split(b'\n', 1)
+                    reply = json.loads(line)
+                    index = reply.get('request_id')
+                    if type(index) is int and 0 <= index < len(names):
+                        if reply.get('error') != 'success':
+                            raise ValueError('mirror property unavailable')
+                        values[names[index]] = reply.get('data')
+        position, video, audio = (values[name] for name in names[:3])
+        if (type(position) not in (int, float) or not isinstance(video, dict)
+                or not all(type(video.get(key)) is int and video[key] > 0 for key in ('w', 'h'))
+                or not isinstance(audio, dict) or not audio or values['pause'] is not False):
+            raise ValueError('mirror has no current video and audio')
+        return position
+
+    def _present(self):
+        """Own one idle/break presenter or one explicit USB-C and Edge audio mirror."""
         shown, mode, view = None, None, None
+        selected, failed, previous, advanced, checked = None, False, None, 0., 0.
         try:
             while True:
                 with self.lock:
@@ -837,39 +907,102 @@ class Tuner:
                     if self.closed:
                         return
                     self._refresh()
-                    play = self.play
+                    play, mirror = self.play, self.mirror
+                    selection_changed = mirror is not selected
+                    if selection_changed:
+                        selected, failed = mirror, False
                     card = (_card(play.title, time.monotonic() - play.breaking)
                             if play is not None and self.playback == 'break' else None)
-                    wanted = 'break' if card is not None else 'idle' if play is None else None
+                    watching = tv_watching()
+                    wanted = ('mirror' if mirror is not None else
+                              'break' if card is not None else 'idle' if play is None else None)
+                    if not watching:
+                        wanted = None
+                        failed = False  # Reconnection may reacquire the selected source once.
+                        if mirror is not None:
+                            mirror.update(status='waiting_client')
+                            mirror.pop('error', None)
+                    elif wanted == 'mirror' and failed:
+                        wanted = None
                     title = play.title if play is not None else ''
-                if wanted != mode:
-                    mode = wanted
+                if (wanted != mode or (mode == 'mirror' and selection_changed)
+                        or (mode == 'mirror' and mirror is not None and view is None and not failed)):
+                    prior_mode, mode = mode, wanted
                     if view is not None:
-                        _end(view)
+                        self._end_presenter(view, prior_mode == 'mirror')
                         view = None
                         try:
-                            # The view's window took the full screen from the player's, and the
-                            # compositor draws an ordinary window on every frame where it hands a
-                            # fullscreen one straight to the output (measured: 17% of the GPU and a
-                            # skipped frame a second on the television).
                             self.player.command('set_property', 'fullscreen', True)
                         except (OSError, ValueError):
                             pass
-                    if mode is not None and self.break_view:
+                    if mode == 'mirror':
+                        try:
+                            os.unlink(self.mirror_socket)
+                        except FileNotFoundError:
+                            pass
+                        with self.lock:
+                            # Selection and process publication are atomic with stop/play/shutdown.
+                            if self.closed or self.mirror is not mirror:
+                                mode = None
+                                continue
+                            mirror.update(status='starting')
+                            mirror.pop('error', None)
+                            try:
+                                view = subprocess.Popen([self.mirror_view, self.mirror_socket],
+                                                        stdin=subprocess.DEVNULL, start_new_session=True)
+                                self.mirror_process = view
+                                advanced = time.monotonic()
+                                previous, checked = None, 0.
+                            except OSError:
+                                failed = True
+                                mirror.update(status='failed', error='mirror presenter did not start')
+                    elif mode is not None and self.break_view:
                         try:
                             view = subprocess.Popen([self.break_view, title, mode], stdin=subprocess.DEVNULL,
                                                     start_new_session=True)
                         except OSError as error:
                             log.warning('%s graph view did not start (%s)', mode, type(error).__name__)
+                if mode == 'mirror' and view is not None:
+                    now = time.monotonic()
+                    error = 'mirror presenter exited' if view.poll() is not None else None
+                    if error is None and now - checked >= 1:
+                        checked = now
+                        try:
+                            position = self._mirror_picture()
+                            moving = previous is not None and position > previous and view.poll() is None
+                            previous = position
+                            if moving:
+                                advanced = time.monotonic()
+                            with self.lock:
+                                if self.mirror is mirror:
+                                    mirror['status'] = 'active' if moving else 'starting'
+                                    if moving:
+                                        self.mirror_observed = time.monotonic()
+                        except (OSError, ValueError, TypeError):
+                            with self.lock:
+                                if self.mirror is mirror:
+                                    mirror['status'] = 'starting'
+                        if now - advanced > 15:
+                            error = 'mirror has no advancing video and audio readback'
+                    if error is not None:
+                        self._end_presenter(view, True)
+                        view, failed = None, True
+                        with self.lock:
+                            if self.mirror is mirror:
+                                mirror.update(status='failed', error=error)
                 if card != shown:
                     try:
                         self.player.command('osd-overlay', 0, 'ass-events' if card else 'none', card or '')
                         shown = card
                     except (OSError, ValueError):
-                        shown = None  # An overlay ends with the connection that drew it.
+                        shown = None
         finally:
             if view is not None:
-                _end(view)  # Cleanup paired with its start, whatever ended the presenter.
+                self._end_presenter(view, mode == 'mirror')
+            try:
+                os.unlink(self.mirror_socket)
+            except FileNotFoundError:
+                pass
 
     # Control
 
@@ -878,6 +1011,11 @@ class Tuner:
         if op in ('vod-state', 'seek', 'track') or (op in ('pause', 'resume')
                 and ('generation' in message or 'source' in message)):
             return self._local_control(message)
+        if op == 'mirror':
+            if set(message) != {'op', 'surface'} or message['surface'] != 'usb-c':
+                raise ValueError('mirror takes only surface usb-c with Microsoft Edge playback audio')
+            self._replace(None, mirror=True)
+            return self.state()
         if op == 'play':
             title, wait = message.get('title'), message.get('wait', 0)
             if not isinstance(title, str) or not title.strip() or len(title) > 160:
@@ -992,7 +1130,7 @@ class Tuner:
                         'get_property', 'idle-active') is not True):
                     raise ValueError('the player did not verify the exact local stop')
         elif op != 'state':
-            raise ValueError('op is play, pause, resume, stop or state')
+            raise ValueError('op is play, mirror, pause, resume, stop or state')
         return self.state()
 
     def _stop_queue(self, message):
@@ -1183,7 +1321,8 @@ class Tuner:
                     except (OSError, ValueError):
                         pass  # Uncertain cleanup is never replayed; there is no correction seek/load.
 
-    def _replace(self, play, wait=False, expected=None, queued=None, continuation=None, queue_origin=None):
+    def _replace(self, play, wait=False, expected=None, queued=None, continuation=None, queue_origin=None,
+                 mirror=False):
         """Make play (or nothing) the current play and release everything the previous one held.
 
         Closing a stream waits for its downloads in flight (0.4-3 s measured), so the previous
@@ -1191,6 +1330,10 @@ class Tuner:
         """
         with self.control:
             with self.lock:
+                if mirror and self.closed:
+                    raise MediaUnavailable('tuner_closed')
+                if mirror and self.mirror is not None:
+                    return None
                 if queue_origin is not None:
                     current_queue = self.queue
                     if (current_queue is None or current_queue.origin_generation != queue_origin
@@ -1242,6 +1385,10 @@ class Tuner:
                     continuation.generation = play.generation
                     continuation.state = 'waiting'
                 old, self.play = self.play, play
+                prior_mirror_process = self.mirror_process
+                self.mirror = ({'surface': 'usb-c', 'audio': 'Microsoft Edge',
+                                'status': 'waiting_client'} if mirror else None)
+                self.mirror_observed = 0.
                 self.ended = ({'generation': old.generation, 'source': old.identity,
                                'outcome': 'stopping' if expected is not None or queue_origin is not None else 'stopped'}
                               if play is None and old is not None and old.local is not None else None)
@@ -1256,6 +1403,14 @@ class Tuner:
                 old.cancelled.set()
             refused = None
             try:
+                # The presenter never takes control; wait releases the condition so it can
+                # reap the exact prior capture. A newly selected mirror is not the old process.
+                with self.lock:
+                    stopped = self.lock.wait_for(lambda: prior_mirror_process is None
+                                                 or self.mirror_process is not prior_mirror_process,
+                                                 timeout=4.)
+                if not stopped:
+                    raise ValueError('mirror teardown unverified; do not replay the operation')
                 if play is None or play.channel:
                     # Nothing of the previous play stays on screen while a channel tunes in.
                     if queue_origin is not None:

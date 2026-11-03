@@ -1,0 +1,381 @@
+#!/usr/bin/python
+"""Register actual desktop games with GameMode; never register Steam/Battle.net themselves.
+
+Window events discover games; pidfds own their observed lifetime. GameMode owns all
+optimizations and removal of exited clients. Stopping this observer deliberately leaves
+live games registered, so a service restart cannot interrupt their gaming handoff.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+import dbus
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+BUS = 'com.feralinteractive.GameMode'
+OBJECT = '/com/feralinteractive/GameMode'
+RUNTIME = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}'))
+STATE = RUNTIME / 'obsidience-game-mode' / 'status.json'
+STEAM_CLASS = re.compile(r'steam_app_([1-9][0-9]*)\Z', re.I)
+# Exact game executable names, not path/title substring matching.
+BNET = {'wow.exe', 'wowb.exe', 'wowclassic.exe', 'diabloiv.exe', 'diablo iii64.exe',
+        'overwatch.exe', 'hearthstone.exe', 'sc2_x64.exe', 'starcraft.exe',
+        'heroesofthestorm_x64.exe', 'warcraft iii.exe'}
+WOW = {'wow.exe', 'wowb.exe', 'wowclassic.exe'}
+HELPER = re.compile(r'^(?:steam|steamwebhelper|steamservice|steam-runtime.*|pressure-vessel.*|'
+                    r'reaper|wineserver|services.exe|explorer.exe|winedevice.exe|'
+                    r'battle\.net(?: launcher)?\.exe|agent.exe|wowvoiceproxy.*|'
+                    r'.*(?:crash|installer|updater|setup|uninstall|cefsubprocess|webhelper).*)$', re.I)
+
+
+def absolute_path(value: str) -> Path | None:
+    """Normalize local absolute paths before checking directory boundaries."""
+    try:
+        path = Path(value)
+        return path.resolve() if path.is_absolute() else None
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+# Colon-separated existing installation roots, configured on the observer unit.
+# Empty/invalid roots admit no Battle.net games; Steam discovery is independent.
+BNET_ROOTS = tuple(path for value in os.environ.get('OBSIDIENCE_BATTLENET_ROOTS', '').split(os.pathsep)
+                   if (path := absolute_path(value)) is not None
+                   and path != Path(path.anchor) and path.is_dir())
+
+
+def in_battlenet_installation(values: list[str]) -> bool:
+    return any(path.is_relative_to(root) for value in values
+               if (path := absolute_path(value)) is not None for root in BNET_ROOTS)
+
+
+def process(pid: int) -> dict | None:
+    """Read only named identity fields; never copy/log an entire environment."""
+    try:
+        root = Path(f'/proc/{pid}')
+        if root.stat().st_uid != os.getuid() or os.readlink(root / 'ns/pid') != os.readlink('/proc/self/ns/pid'):
+            return None
+        stat = (root / 'stat').read_text().rsplit(')', 1)[1].split()
+        if stat[0] == 'Z':
+            return None
+        cgroup = (root / 'cgroup').read_text()
+        if any(part in cgroup for part in ('machine.slice', 'libpod-', 'docker-')):
+            return None
+        argv = (root / 'cmdline').read_bytes()[:16384].split(b'\0')
+        comm = (root / 'comm').read_text().strip()
+        executable = os.readlink(root / 'exe')
+        selected = {}
+        for value in (root / 'environ').read_bytes()[:262144].split(b'\0'):
+            key, _, val = value.partition(b'=')
+            if key in (b'SteamAppId', b'SteamGameId', b'WINEPREFIX'):
+                selected[key.decode()] = val.decode(errors='replace')
+        return {'start_time': int(stat[19]), 'comm': comm, 'executable': executable,
+                'argv': [arg.decode(errors='replace') for arg in argv[:8]], 'env': selected}
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def identify(window: dict) -> dict | None:
+    try:
+        pid = int(window.get('pid', 0))
+    except (TypeError, ValueError):
+        return None
+    identity = process(pid) if pid > 0 else None
+    if not identity or HELPER.fullmatch(identity['comm']):
+        return None
+    names = [arg.replace('\\', '/').rsplit('/', 1)[-1].lower() for arg in identity['argv'][:3]]
+    game = next((name for name in names if name in BNET), '')
+    prefix = identity['env'].get('WINEPREFIX', '').rstrip('/')
+    if game:
+        # A familiar executable name is admitted only in a local Battle.net/WoW
+        # installation, with its real Wine process name (comm is limited to 15 bytes).
+        if (identity['comm'].lower() != game[:15]
+                or not in_battlenet_installation([prefix, *identity['argv'][:3]])):
+            return None
+        source = 'wow' if game in WOW else 'battlenet'
+    else:
+        match = STEAM_CLASS.fullmatch(str(window.get('class', '')))
+        appid = match[1] if match else identity['env'].get('SteamAppId', '')
+        if not appid.isdigit() or int(appid) <= 0:
+            return None
+        # Runtime/helper windows can inherit the app ID. Exclude the executables
+        # that launch the real game, and require a normal mapped game window.
+        basename = Path(identity['executable']).name
+        if HELPER.fullmatch(basename) or any(HELPER.fullmatch(name) for name in names[:1]):
+            return None
+        source = f'steam:{appid}'
+    return {'pid': pid, 'start_time': identity['start_time'], 'title': str(window.get('title', ''))[:256],
+            'source': source, 'executable': identity['comm']}
+
+
+def clients() -> list[dict]:
+    done = subprocess.run(['/usr/bin/hyprctl', 'clients', '-j'], capture_output=True,
+                          text=True, check=True, timeout=3)
+    value = json.loads(done.stdout)
+    if not isinstance(value, list):
+        raise ValueError('Invalid compositor clients')
+    return value
+
+
+class Observer:
+    def __init__(self):
+        DBusGMainLoop(set_as_default=True)
+        self.bus = dbus.SessionBus()
+        self.loop = GLib.MainLoop()
+        self.games: dict[int, dict] = {}
+        self.pidfds: dict[int, int] = {}
+        self.watches: dict[int, int] = {}
+        self.requester_fd = os.pidfd_open(os.getpid())
+        self.socket = None
+        self.pending = b''
+        self.refresh_pending = False
+        self.ready = False
+        self.error = ''
+        self.retry_pending = False
+        self.bus.add_signal_receiver(self.game_changed, signal_name='GameUnregistered',
+                                     dbus_interface=BUS, bus_name=BUS, path=OBJECT)
+        self.bus.add_signal_receiver(self.owner_changed, signal_name='NameOwnerChanged',
+                                     dbus_interface='org.freedesktop.DBus', arg0=BUS)
+        # Recover exact admitted process identities after a crash, including a game
+        # temporarily between windows. Runtime state is private and same-login only.
+        try:
+            previous = json.loads(STATE.read_text())
+            for game in previous.get('games', [])[:128]:
+                pid, start = int(game['pid']), int(game['start_time'])
+                identity = process(pid)
+                if (identity and identity['start_time'] == start and
+                    re.fullmatch(r'(?:steam:[1-9][0-9]*|wow|battlenet)', game['source'])):
+                    self.remember({'pid': pid, 'start_time': start, 'source': game['source'],
+                                   'title': str(game.get('title', ''))[:256],
+                                   'executable': identity['comm']})
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+    def remember(self, game):
+        pid = game['pid']
+        try:
+            fd = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return False
+        identity = process(pid)
+        if not identity or identity['start_time'] != game['start_time']:
+            os.close(fd)
+            return False
+        if pid in self.games:
+            GLib.source_remove(self.watches.pop(pid))
+            os.close(self.pidfds.pop(pid))
+        self.games[pid] = game
+        self.pidfds[pid] = fd
+        self.watches[pid] = GLib.io_add_watch(
+            fd, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR,
+            lambda _fd, _condition, p=pid, start=game['start_time']: self.exited(p, start))
+        return True
+
+    def status(self):
+        value = {'version': 1, 'ready': self.ready, 'observer_pid': os.getpid(),
+                 'updated_at': time.time(), 'error': self.error,
+                 'games': list(self.games.values())}
+        temporary = STATE.with_suffix('.new')
+        temporary.write_text(json.dumps(value, sort_keys=True) + '\n')
+        temporary.replace(STATE)
+
+    def game_mode(self):
+        return dbus.Interface(self.bus.get_object(BUS, OBJECT), BUS)
+
+    def register(self, game):
+        pid = game['pid']
+        identity = process(pid)
+        if not identity or identity['start_time'] != game['start_time']:
+            return
+        try:
+            proxy = self.game_mode()
+            # FD API order is game, requester (the older numeric API reverses it).
+            game_fd = dbus.types.UnixFd(self.pidfds[pid])
+            caller_fd = dbus.types.UnixFd(self.requester_fd)
+            if int(proxy.QueryStatusByPIDFd(game_fd, caller_fd, timeout=3)) == 2:
+                game['registration'] = ('observer' if game.get('registration') == 'observer' else 'existing')
+            else:
+                result = int(proxy.RegisterGameByPIDFd(game_fd, caller_fd, timeout=15))
+                if result != 0:
+                    raise RuntimeError(f'GameMode rejected PID {pid}: {result}')
+                game['registration'] = 'observer'
+        except (dbus.DBusException, RuntimeError) as error:
+            game['registration'] = 'failed'
+            self.error = str(error)[:256]
+            print(self.error, file=sys.stderr, flush=True)
+
+    def refresh(self):
+        self.refresh_pending = False
+        try:
+            windows = clients()
+            self.ready = True
+            self.error = ''
+            for window in windows:
+                if not isinstance(window, dict) or not window.get('mapped', True):
+                    continue
+                game = identify(window)
+                if not game:
+                    continue
+                pid = game['pid']
+                old = self.games.get(pid)
+                if old and old['start_time'] == game['start_time']:
+                    old['title'] = game['title']
+                    if old.get('registration') == 'failed':
+                        self.register(old)
+                    continue
+                # pidfd open + identity recheck closes the discovery/PID reuse race.
+                if self.remember(game):
+                    self.register(game)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            self.error = str(error)[:256]
+            self.ready = False
+        self.status()
+        return GLib.SOURCE_REMOVE
+
+    def schedule_refresh(self):
+        if not self.refresh_pending:
+            self.refresh_pending = True
+            GLib.idle_add(self.refresh)
+
+    def exited(self, pid, start):
+        game = self.games.get(pid)
+        if game and game['start_time'] == start:
+            self.games.pop(pid)
+            self.watches.pop(pid)
+            os.close(self.pidfds.pop(pid))
+            # Do not issue a numeric-PID unregister after exit: another process
+            # could already own that number. GameMode's native reaper owns removal.
+            self.status()
+        return GLib.SOURCE_REMOVE
+
+    def game_changed(self, pid, _path):
+        game = self.games.get(int(pid))
+        if game:
+            game['registration'] = 'failed'
+            GLib.idle_add(self.reregister)
+
+    def owner_changed(self, _name, _old, new):
+        if not new:
+            for game in self.games.values():
+                game['registration'] = 'failed'
+            self.error = 'GameMode connection lost'
+            self.status()
+        if self.games:
+            # One event-triggered reconnect can reactivate the D-Bus service.
+            GLib.idle_add(self.reregister)
+
+    def reregister(self):
+        for game in self.games.values():
+            self.register(game)
+        if all(game.get('registration') != 'failed' for game in self.games.values()):
+            self.error = ''
+        self.status()
+        return GLib.SOURCE_REMOVE
+
+    def connect(self):
+        self.retry_pending = False
+        try:
+            signature = os.environ.get('HYPRLAND_INSTANCE_SIGNATURE', '')
+            if not signature:
+                raise RuntimeError('Hyprland instance signature unavailable')
+            path = RUNTIME / 'hypr' / signature / '.socket2.sock'
+            connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            connection.settimeout(3)
+            try:
+                connection.connect(str(path))
+            except Exception:
+                connection.close()
+                raise
+            connection.setblocking(False)
+            self.socket = connection
+            self.pending = b''
+            GLib.io_add_watch(connection.fileno(), GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, self.events)
+            # Subscribe before snapshot so a game opening during discovery is seen.
+            self.schedule_refresh()
+            GLib.idle_add(self.reregister)
+        except (OSError, RuntimeError) as error:
+            self.error = str(error)[:256]
+            self.disconnected()
+        return GLib.SOURCE_REMOVE
+
+    def disconnected(self):
+        if self.socket:
+            self.socket.close()
+            self.socket = None
+        self.ready = False
+        self.status()
+        if not self.retry_pending:
+            self.retry_pending = True
+            GLib.timeout_add_seconds(1, self.connect)
+
+    def events(self, _fd, condition):
+        try:
+            data = self.socket.recv(65536)
+            if not data:
+                self.disconnected()
+                return GLib.SOURCE_REMOVE
+            self.pending += data
+            if len(self.pending) > 262144:
+                raise ValueError('Compositor event exceeded bound')
+            lines = self.pending.split(b'\n')
+            self.pending = lines.pop()
+            if any(line.split(b'>>', 1)[0] in (b'openwindow', b'closewindow', b'windowtitlev2')
+                   for line in lines):
+                self.schedule_refresh()
+        except BlockingIOError:
+            pass
+        except (OSError, ValueError) as error:
+            self.error = str(error)[:256]
+            self.disconnected()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def run(self):
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, self.stop)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, self.stop)
+        self.connect()
+        try:
+            self.loop.run()
+        finally:
+            self.ready = False
+            self.status()
+            if self.socket:
+                self.socket.close()
+            for fd in self.pidfds.values():
+                os.close(fd)
+            os.close(self.requester_fd)
+        return 0
+
+    def stop(self):
+        self.loop.quit()
+        return GLib.SOURCE_REMOVE
+
+
+def main():
+    if sys.argv[1:] == ['--inspect']:
+        print(json.dumps([game for window in clients() if (game := identify(window))], indent=2))
+        return 0
+    if sys.argv[1:] == ['--status']:
+        print(STATE.read_text() if STATE.exists() else '{"ready":false,"error":"not running"}')
+        return 0
+    if sys.argv[1:]:
+        raise SystemExit('Usage: game-mode [--inspect|--status]')
+    os.umask(0o077)
+    STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with (STATE.parent / 'lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return Observer().run()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

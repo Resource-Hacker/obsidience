@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS source_evidence(
   origin_source_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS source_event_receipts ON source_evidence(event_key,event_dispatched_at);
+CREATE INDEX IF NOT EXISTS source_ref_versions ON source_evidence(source_ref,created_at);
 CREATE TABLE IF NOT EXISTS conversations(
   id TEXT PRIMARY KEY, created_at REAL NOT NULL
 );
@@ -1767,7 +1768,8 @@ class Index:
 
     def sync_review_notifications(self, kind: str, items: list[dict]) -> None:
         """Reconcile controller notifications; acknowledgement never clears health."""
-        if kind != "health" or any(not isinstance(item.get("file"), str) for item in items):
+        if kind not in ("health", "source-changed") or any(
+                not isinstance(item.get("file"), str) for item in items):
             raise ValueError("invalid Review notification")
         desired = {item["file"]: json.dumps(item, sort_keys=True) for item in items}
         with self.lock:
@@ -2280,6 +2282,40 @@ class Index:
             (source_type, source_ref, media_type, content_sha256, f"{lane}/%"),
         ).fetchone()
         return self._source_row(row)
+
+    def changed_web_sources(self) -> list[dict]:
+        """External web Sources (http[s] source_ref) captured in more than one
+        content version, each with its current version and superseded older ids.
+
+        A Knowledge citation pins ``source://<id>`` (one content version); when
+        the same URL is re-fetched with changed bytes, dedup misses and a new id
+        supersedes it. This lets the Review owner find Articles that still cite a
+        stale version. System evidence is excluded (its publisher refreshes it).
+        """
+        rows = self.db.execute(
+            "SELECT id,source_ref,content_sha256,captured_at,created_at FROM source_evidence "
+            "WHERE path NOT LIKE 'system/%' "
+            "AND (source_ref LIKE 'http://%' OR source_ref LIKE 'https://%') "
+            "ORDER BY source_ref,created_at"
+        ).fetchall()
+        groups: dict[str, list] = {}
+        for sid, ref, sha, captured_at, created_at in rows:
+            groups.setdefault(ref, []).append((sid, sha, captured_at))
+        changed = []
+        for ref, versions in groups.items():
+            # Same-sha re-fetches never create a new row (dedup by fingerprint),
+            # so more than one distinct sha for a ref means the page changed.
+            if len({sha for _id, sha, _c in versions}) < 2:
+                continue
+            current_id, current_sha, current_captured = versions[-1]
+            superseded = [sid for sid, sha, _c in versions[:-1] if sha != current_sha]
+            if superseded:
+                changed.append({
+                    "source_ref": ref, "current_id": current_id,
+                    "current_sha256": current_sha, "current_captured_at": current_captured,
+                    "superseded_ids": superseded,
+                })
+        return changed
 
     def pending_source_events(self, limit: int = 100) -> list[dict]:
         rows = self.db.execute(

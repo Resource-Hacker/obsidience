@@ -19,9 +19,7 @@ deploy restarts. Elsewhere it is named and left alone.
 
 --only narrows the affected owners; --restart also selects a private-config
 owner when its tracked files did not change. Required dependent restarts stay
-included. An installed Discord camera active before a Harness/UI deployment is
-restored after dependency readiness, including scoped Realtime recovery. Scoped
-deploys record a separate receipt and leave the full-deploy
+included. Scoped deploys record a separate receipt and leave the full-deploy
 checkpoint and rollback history unchanged; the next full deploy still handles
 all pending owners. Scoped rollback is not supported: restore the selected
 owner's matching configuration/source backup and deploy that owner explicitly.
@@ -41,7 +39,6 @@ import sqlite3
 import subprocess
 import sys
 import time
-import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -53,7 +50,7 @@ RESTART_SHELL = ROOT / "obsidience" / "shell" / "session" / "restart-shell"
 HARNESS_UNITS = "obsidience/harness/systemd/"
 SHELL_UNITS = ROOT / "obsidience" / "shell" / "systemd"
 # Unit templates whose installed copies are what runs; an identical move changes none of them.
-UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", "obsidience/discord/systemd/", "obsidience/lights/systemd/", HARNESS_UNITS)
+UNIT_SOURCES = ("obsidience/tv/systemd/", "obsidience/shell/systemd/", "obsidience/lights/systemd/", HARNESS_UNITS)
 
 
 def git(*args: str) -> str:
@@ -89,19 +86,20 @@ def targets(changed: list[str]) -> list[str]:
         owners.append("harness")
     if any(p.startswith("obsidience/shell/") for p in changed):
         owners.append("shell")
+    if any(p in {
+        "obsidience/shell/session/game-mode",
+        "obsidience/shell/systemd/obsidience-shell-game-mode.service",
+        "obsidience/shell/systemd/obsidience-game-mode-profile.service",
+        "obsidience/tv/host/mode",
+    } for p in changed):
+        owners.append("gaming")
     if any(p.startswith("obsidience/ui/") for p in changed):
         owners.append("ui")
     if any(p.startswith("obsidience/lights/") for p in changed):
         owners.append("lights")
-    camera_unit = "obsidience/discord/systemd/obsidience-discord-camera.service"
-    if any(p.startswith("obsidience/discord/") and not p.startswith("obsidience/discord/camera/")
-           and p != camera_unit for p in changed):
-        owners.append("discord")
-    if any(p.startswith("obsidience/discord/camera/") or p == camera_unit for p in changed):
-        owners.append("discord-camera")
     if "obsidience/tv/systemd/obsidience-tv-player.service" in changed:
         owners.append("tv-player")
-    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/systemd/obsidience-tv-tuner.service",
+    if (any(p in {"obsidience/tv/host/tuner.py", "obsidience/tv/host/break-view", "obsidience/tv/host/mirror-view", "obsidience/tv/systemd/obsidience-tv-tuner.service",
                   "obsidience/harness/media/config.py", "obsidience/harness/media/sources.py",
                   "obsidience/harness/media/source_probe.py", "obsidience/harness/media/torbox_files.py",
                   "obsidience/harness/media/torbox.py", "obsidience/harness/media/progress.py",
@@ -195,7 +193,7 @@ def require_tv_idle() -> None:
     """Refuse before restarting any owner if the TV's playback is active or unknown."""
     try:
         state = tuner_state()
-        if not state.get("player") or state.get("playback") != "idle":
+        if not state.get("player") or state.get("playback") != "idle" or state.get("mirror") is not None:
             raise ValueError("TV player is active or unavailable")
         if subprocess.run(["systemctl", "--user", "is-active", "--quiet", "obsidience-tv-android.service"]).returncode == 0:
             sys.path.insert(0, str(ROOT))
@@ -242,17 +240,6 @@ def wait_idle(limit: float = 900) -> None:
             # A Task in review has finished and waits only for the owner.
             busy = busy or any(task.get("execution", {}).get("state") not in
                                {"idle", "blocked", "failed", "needs_attention", "review"} for task in tasks)
-            try:
-                discord = get("/api/discord/status")
-            except urllib.error.HTTPError as error:
-                if error.code != 404:
-                    raise
-                discord = {}  # First deployment from a pre-Discord Harness.
-            transport = discord.get("transport") or {}
-            busy = busy or bool(discord.get("active_turns") or transport.get("active_turns")
-                                or transport.get("pending_speech"))
-            busy = busy or any(transport.get(key) not in (None, "idle")
-                               for key in ("playback", "speech_playback"))
             # The conversation's live owner, not historical run rows, decides
             # whether a turn is active. This subscription sends no command.
             from websockets.sync.client import connect
@@ -292,19 +279,6 @@ def wait_ready(limit: float = 300) -> None:
             pass
         time.sleep(2)
     sys.exit("The Harness API did not initialize; inspect journalctl --user -u obsidience-harness-dev.")
-
-
-def wait_camera_data(limit: float = 30) -> None:
-    """Require the camera's public graph dependency before restoring its owner."""
-    deadline = time.monotonic() + limit
-    while time.monotonic() < deadline:
-        try:
-            if get("/api/discord/presentation").get("available") is True:
-                return
-        except OSError:
-            pass
-        time.sleep(.5)
-    sys.exit("Discord graph data did not become available; camera not restored.")
 
 
 def check_voice(limit: float = 90) -> str | None:
@@ -358,36 +332,6 @@ def restart(owner: str) -> None:
                 pass
             time.sleep(.5)
         sys.exit("Matter controller did not become ready; inspect obsidience-lights.service.")
-    elif owner == "discord-camera":
-        name = "obsidience-discord-camera.service"
-        destination = pathlib.Path.home() / ".config/systemd/user" / name
-        if not destination.exists():
-            print("Discord camera is not installed; installation remains explicit.")
-            return
-        shutil.copy2(ROOT / "obsidience/discord/systemd" / name, destination)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "restart", name], check=True)
-    elif owner == "discord":
-        name = "obsidience-discord-bot.service"
-        destination = pathlib.Path.home() / ".config/systemd/user" / name
-        if not destination.exists():
-            print("Discord is not installed; installation remains explicit.")
-            return
-        subprocess.run(["npm", "ci", "--omit=dev", "--no-audit", "--no-fund"],
-                       cwd=ROOT / "obsidience/discord", check=True)
-        shutil.copy2(ROOT / "obsidience/discord/systemd" / name, destination)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "--user", "restart", name], check=True)
-        deadline = time.monotonic() + 45
-        while time.monotonic() < deadline:
-            try:
-                state = get("/api/discord/status")
-                if (state.get("transport") or {}).get("ready") is True:
-                    return
-            except OSError:
-                pass
-            time.sleep(1)
-        sys.exit("Discord did not become ready; inspect obsidience-discord-bot.service.")
     elif owner in {"media-tiramisu", "media-prowlarr", "media-torbox"}:
         provider = owner.removeprefix("media-")
         name = f"obsidience-media-{provider}.service"
@@ -421,6 +365,29 @@ def restart(owner: str) -> None:
     elif owner == "harness":
         subprocess.run(["systemctl", "--user", "restart", "obsidience-harness-dev.service"], check=True)
         wait_ready()
+    elif owner == "gaming":
+        # This independent session adapter needs no shell, voice or game restart.
+        installed = pathlib.Path.home() / ".config/systemd/user"
+        for name in ("obsidience-shell-game-mode.service", "obsidience-game-mode-profile.service",
+                     "obsidience-shell-session.target"):
+            shutil.copy2(SHELL_UNITS / name, installed / name)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", "obsidience-shell-game-mode.service"], check=True)
+        status = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "obsidience-game-mode/status.json"
+        deadline = time.monotonic() + 15
+        pid = subprocess.check_output(["systemctl", "--user", "show", "obsidience-shell-game-mode.service",
+                                       "-p", "MainPID", "--value"], text=True).strip()
+        while time.monotonic() < deadline:
+            try:
+                current = json.loads(status.read_text())
+                if (current.get("ready") is True and str(current.get("observer_pid")) == pid
+                        and all(game.get("registration") in {"observer", "existing"}
+                                for game in current.get("games", []))):
+                    return
+            except (OSError, ValueError):
+                pass
+            time.sleep(.25)
+        sys.exit("Gaming observer did not become ready; inspect obsidience-shell-game-mode.service.")
     elif owner == "shell":
         install_shell_units()
         subprocess.run([str(RESTART_SHELL)], check=True)
@@ -493,10 +460,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", action="store_true")
     parser.add_argument("--restart", action="append", default=[],
-                        choices=("harness", "lights", "discord", "discord-camera", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
+                        choices=("harness", "gaming", "lights", "tv-player", "tv-tuner", "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Include an affected owner after a private configuration change")
     parser.add_argument("--only", action="append", default=[],
-                        choices=("harness", "shell", "ui", "lights", "discord", "discord-camera", "tv-player", "tv-tuner",
+                        choices=("harness", "shell", "gaming", "ui", "lights", "tv-player", "tv-tuner",
                                  "media-catalogue", "media-tiramisu", "media-prowlarr", "media-torbox"),
                         help="Deploy only selected affected owners; keep the full checkpoint unchanged")
     parser.add_argument("--recover-realtime", action="store_true",
@@ -527,18 +494,6 @@ def main() -> None:
         owners = [owner for owner in owners if owner in args.only]
     if args.recover_realtime and set(owners) != {"harness"}:
         parser.error("--recover-realtime requires a Harness-only deployment")
-    # Validate the requested recovery scope above before adding its dependent.
-    # Preserve intentionally stopped/failed cameras; never install one implicitly.
-    camera_unit = pathlib.Path.home() / ".config/systemd/user/obsidience-discord-camera.service"
-    if ({"harness", "ui"} & set(owners) and "discord-camera" not in owners
-            and camera_unit.is_file()
-            and subprocess.run(["systemctl", "--user", "is-active", "--quiet",
-                                "obsidience-discord-camera.service"]).returncode == 0):
-        owners.append("discord-camera")
-        print("Dependency restoration: the active Discord camera will restart after "
-              "Harness/UI readiness; the requested --only scope stays unchanged.")
-    camera_after_dependencies = ("discord-camera" in owners
-                                 and bool({"harness", "ui"} & set(owners)))
     if "tv-player" in owners and "tv-tuner" not in owners:
         owners.append("tv-tuner")
     for owner in tuple(owners):
@@ -599,16 +554,9 @@ def main() -> None:
         head = git("rev-parse", "HEAD")
     if owners:
         for owner in owners:
-            if owner == "discord-camera" and camera_after_dependencies:
-                continue  # Restore once, after the Harness/UI dependency restarts.
             if owner == "tv-tuner" and "tv-player" in owners:
                 continue  # The player restart already restored the tuner with its current unit.
             restart(owner)
-        if camera_after_dependencies:
-            # The public graph depends on Harness/UI, not desktop audio hardware.
-            # A failed restart or unavailable graph still prevents restoration.
-            wait_camera_data()
-            restart("discord-camera")
         time.sleep(5)
     failures = failures_since(started)
     if "harness" in owners and (voice := check_voice()):

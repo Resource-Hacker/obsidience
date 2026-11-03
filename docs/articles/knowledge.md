@@ -22,7 +22,7 @@ subjects for a new owner to fill:
 | `Architecture/` | Shared design: the four [Modules](../modules/index.md), with `Harness/` and `Shell/` implementation Articles. The [Ontology](../ontology/index.md) lives here as `Architecture/Harness/action-ontology`. |
 | `Agents/Executive/Preferences/` | Owner preferences. Empty in a fresh installation. |
 | `Games/`, `Projects/`, `Websites/`, `News & Research/` | World subjects, initially just their folder Articles. |
-| `Media/` | Media knowledge, including the Discord Agent's playback leaf. |
+| `Media/` | Media catalogue and delivery knowledge. |
 
 Placement rules: established preferences belong under the Executive;
 workstation procedures belong under `Runbooks/Operations` with explicit Skill

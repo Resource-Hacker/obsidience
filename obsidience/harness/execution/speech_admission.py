@@ -35,6 +35,32 @@ from ..models.context import PROMPT_SAFETY_TOKENS, TaskContext
 
 PREPARE_TIMEOUT_SECONDS = 30
 
+# Two-phase "staged reasoning" voice reply (CONFIG.extras.voice_staged_reasoning,
+# default off; real/non-speculative admission only). Phase 1 speaks a fast
+# unreasoned opener (the admission's own effort, 'none' for the voice Agent),
+# bounded to roughly one short sentence; phase 2 reasons at low effort during
+# the opener's playback and continues the SAME reply, streamed into the same
+# early-speech queue. Off leaves the single-call path unchanged.
+STAGED_OPENER_MAX_CHARS = 160
+_SENTENCE_END = ('.', '!', '?', '…')
+STAGED_BODY_EFFORT = 'low'
+STAGED_CONTINUATION = (
+    'You already started your reply out loud with: "{opener}". '
+    'Continue that SAME reply in one natural flow — do not repeat it, do not '
+    're-greet, just keep going.')
+
+
+def _opener_complete(text: str) -> bool:
+    """The staged opener has reached a sentence end or its length bound."""
+    stripped = text.rstrip()
+    if len(text) >= STAGED_OPENER_MAX_CHARS:
+        return True
+    # A streamed abbreviation is not a sentence boundary (e.g. Rays vs. Brewers).
+    if stripped and stripped.split()[-1].lower() in {'vs.', 'v.', 'mr.', 'mrs.', 'ms.', 'dr.',
+                                                    'prof.', 'st.', 'e.g.', 'i.e.'}:
+        return False
+    return bool(stripped) and stripped[-1] in _SENTENCE_END
+
 
 def _admission_messages(messages: list[dict], text: str) -> list[dict]:
     """Keep the one-response output contract adjacent to the current transcript.
@@ -116,13 +142,13 @@ def _history(view: dict | None, *, before_turn: str | None = None) -> str | None
     return _digest(rows)
 
 
-def _sanitize(responses: list[LlmResponse]) -> tuple[str, LlmResponse | None]:
+def _sanitize(responses: list[LlmResponse], *, require_clean: bool = True) -> tuple[str, LlmResponse | None]:
     """Parse the buffered visible prefix across parts; drop all private reasoning."""
     if not responses:
         raise SpeechOutputError('Speech admission returned no final response')
-    if any(response.error_code or response.interrupted
-           or response.finish_reason not in {None, types.FinishReason.STOP}
-           for response in responses):
+    if require_clean and any(response.error_code or response.interrupted
+                             or response.finish_reason not in {None, types.FinishReason.STOP}
+                             for response in responses):
         raise SpeechOutputError('Speech admission did not finish cleanly')
     parts = [part.model_copy(deep=True) for response in responses
              for part in (response.content.parts if response.content else []) if not part.thought]
@@ -155,6 +181,26 @@ def _sanitize(responses: list[LlmResponse]) -> tuple[str, LlmResponse | None]:
             kept.append(part)
     return 'complete', responses[-1].model_copy(update={
         'content': types.Content(role='model', parts=kept), 'partial': False})
+
+
+def _staged_response(opener: str, responses: list[LlmResponse]) -> LlmResponse:
+    """Strip continuation control syntax, retaining native Parts and terminal metadata."""
+    if not responses:
+        raise SpeechOutputError('Staged speech continuation returned no final response')
+    base = responses[-1]
+    if (base.error_code or base.interrupted or (base.content is None
+            and base.finish_reason not in {None, types.FinishReason.STOP})):
+        return base.model_copy(update={'partial': False})
+    decision, response = _sanitize(responses, require_clean=False)
+    if decision != 'complete' or response is None:
+        raise SpeechOutputError('Staged speech continuation did not complete the admitted turn')
+    parts = response.content.parts
+    # Match the boundary sent to early speech, preserving every native Tool Part.
+    first_text = next((part for part in parts if part.text), None)
+    separator = (' ' if first_text is not None and opener and not opener[-1].isspace()
+                 and not first_text.text[0].isspace() else '')
+    return response.model_copy(update={'content': types.Content(
+        role='model', parts=[types.Part.from_text(text=opener + separator), *parts])})
 
 
 @dataclass
@@ -404,6 +450,10 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
     if interruption := runtime._interruption_cue(before_sequence):
         params['speech_interruption'] = interruption
     metrics = {'speculative': True} if speculative else {}
+    from ..config import CONFIG
+    staged = not speculative and bool(CONFIG.extras.get('voice_staged_reasoning', False))
+    if staged:
+        metrics['staged'] = True
     async with asyncio.timeout(PREPARE_TIMEOUT_SECONDS):
         async with _model(spec, speculative) as active_spec:
             if _model_binding(active_spec, effort) != _model_binding(spec, effort):
@@ -498,7 +548,7 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     retrieval_ms=float(activation['retrieval_ms']), metrics=metrics, memory=memory,
                     recall=(query, recalled), _runtime=runtime)
 
-            handed, said = None, ''
+            handed, said, opener_text = None, '', ''
             if (run := _RUN.get()) is not None:
                 run[1] = time.monotonic()  # its model request is in flight
             elif _STALE[0] is not None:
@@ -515,15 +565,31 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                         prefix.observe(response)
                         if not response.partial:
                             responses.append(response)
+                            if staged and response.content and any(
+                                    part.function_call for part in response.content.parts):
+                                staged = False
+                                if handed is not None:
+                                    handed._events.put_nowait({'type': 'tool-call-delta'})
                             continue
                         parts = response.content.parts if response.content else []
                         visible = ''.join(part.text for part in parts if part.text is not None and not part.thought)
                         called = any(part.function_call for part in parts)
+                        if called and staged:
+                            staged = False
                         if visible or called:
                             metrics.setdefault('first_public_delta_ms', round((time.monotonic() - started) * 1000, 3))
                         if handed is not None:
                             if visible:
                                 handed._events.put_nowait({'type': 'text-delta', 'text': visible})
+                                if staged:
+                                    opener_text += visible
+                            if staged:
+                                # The opener stops at one short sentence; phase 2
+                                # (low effort) continues it during its playback.
+                                if _opener_complete(opener_text):
+                                    metrics['opener_ms'] = round((time.monotonic() - started) * 1000, 3)
+                                    break
+                                continue
                             if called:
                                 handed._events.put_nowait({'type': 'tool-call-delta'})
                             continue
@@ -541,6 +607,11 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                         handed._events.put_nowait({'type': 'text-delta', 'text': said[2:]})
                         _HANDED = handed
                         handover.set_result(handed)
+                        if staged:
+                            opener_text = said[2:]
+                            if _opener_complete(opener_text):
+                                metrics['opener_ms'] = round((time.monotonic() - started) * 1000, 3)
+                                break
             finally:
                 try:
                     await owner.close()
@@ -548,7 +619,8 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                     model_route.ADMISSION.reset(token)
                     if run is not None:
                         run[2] = time.monotonic()
-                    if handed is not None:
+                    if handed is not None and not staged:
+                        # Staged phase 2 appends to this queue before the sentinel.
                         handed._events.put_nowait(None)
             metrics['generation_ms'] = round((time.monotonic() - started) * 1000, 3)
             if responses and (usage := next((r.usage_metadata for r in reversed(responses)
@@ -556,6 +628,65 @@ async def _generate(runtime, text: str, response_contract: str, speculative: boo
                 metrics.update(prompt_tokens=usage.prompt_token_count or metrics.get('prompt_tokens', 0),
                                cached_input_tokens=usage.cached_content_token_count or 0,
                                output_tokens=usage.candidates_token_count or 0)
+            if staged and handed is not None:
+                # Phase 2: reason at low effort while the opener plays and
+                # continue the same reply. Its visible text (its own control
+                # line stripped) appends to the opener in the early-speech
+                # queue; the combined text becomes the admitted response so
+                # history and memory stay coherent. Closed by the sentinel.
+                body_started = time.monotonic()
+                phase2_messages = [*messages, {'role': 'user',
+                                               'content': STAGED_CONTINUATION.format(opener=opener_text.strip())}]
+                phase2_payload = native.request_payload(phase2_messages, spec, STAGED_BODY_EFFORT, schemas)
+                phase2_request = LlmRequest(
+                    contents=request_contents(phase2_payload['messages'][1:]),
+                    config=types.GenerateContentConfig(
+                        system_instruction=phase2_payload['messages'][0]['content'],
+                        tools=request.config.tools))
+                body_route, body_owner = model_route.owned(model_route.route(spec, STAGED_BODY_EFFORT))
+                phase2_responses, body, marker_done, buffered = [], '', False, ''
+                body_prefix = _ControlPrefix()
+                try:
+                    async with aclosing(body_route.generate_content_async(phase2_request, stream=True)) as stream:
+                        async for response in stream:
+                            body_prefix.observe(response)
+                            if not response.partial:
+                                phase2_responses.append(response)
+                                if response.content and any(part.function_call for part in response.content.parts):
+                                    handed._events.put_nowait({'type': 'tool-call-delta'})
+                                continue
+                            parts = response.content.parts if response.content else []
+                            if any(part.function_call for part in parts):
+                                handed._events.put_nowait({'type': 'tool-call-delta'})
+                            visible = ''.join(part.text for part in parts
+                                              if part.text is not None and not part.thought)
+                            if not visible:
+                                continue
+                            if not marker_done:
+                                # Drop phase 2's own leading control line (e.g. "C\n").
+                                buffered += visible
+                                cut = buffered.find('\n')
+                                if cut == -1:
+                                    continue
+                                if buffered[:cut] != 'C':
+                                    raise SpeechOutputError('Staged continuation omitted its complete-turn control line')
+                                visible, marker_done = buffered[cut + 1:], True
+                                if not visible:
+                                    continue
+                            metrics.setdefault('body_first_delta_ms',
+                                               round((time.monotonic() - body_started) * 1000, 3))
+                            if not body and opener_text and not opener_text[-1].isspace() and not visible[0].isspace():
+                                visible = ' ' + visible
+                            body += visible
+                            handed._events.put_nowait({'type': 'text-delta', 'text': visible})
+                    handed.response = _staged_response(opener_text, phase2_responses)
+                finally:
+                    try:
+                        await body_owner.close()
+                    finally:
+                        handed._events.put_nowait(None)
+    if staged and handed is not None:
+        return handed
     decision, response = _sanitize(responses)
     if handed is None:
         return turn(decision, response)

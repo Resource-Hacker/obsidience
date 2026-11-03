@@ -419,7 +419,7 @@
       "revision": "b17490a705707c09700166d764b3842ab7c1fd4d",
       "license": "Apache-2.0",
       "source_path": "/var/lib/ai/src/obsidience-nemo-speech",
-      "integration": "Existing Pipecat ASR and turn-taking dependency. Local patch moves blocking transcription off the audio event loop; one lock retains streaming-cache, VAD-reset and model-replacement serialization, and cancellation drains in-flight native work. Discord uses upstream RNNTBPEDecoding greedy_batch and GPUBoostingTreeModel for its configured wake name, with per-member recurrent state and per-chunk alignments; the same lock and neural weights are shared, while desktop decoding remains unchanged. No additional recognizer or audio owner.",
+      "integration": "Existing Pipecat ASR and turn-taking dependency. Local patch moves blocking transcription off the audio event loop; one lock retains streaming-cache, VAD-reset and model-replacement serialization, and cancellation drains in-flight native work. No additional recognizer or audio owner.",
       "local_patch": "obsidience/harness/realtime/speech/nemo-stt-playback.patch",
       "local_patch_sha256": "39b69bf7dfe698e5e4fb6942c508e5c3a61e15eaa97ad7112866aefd2a3f4355",
       "patched_stt_sha256": "7364f7e01026e23c33c8551c5206a0d0d686ed08cd68ea3fc2f9c55fafd9cbce"
@@ -1012,49 +1012,6 @@
       "reference_path": "src/pipecat/turns/user_turn_completion_mixin.py",
       "integration": "Architectural adaptation of the contextual incomplete-turn filter, not copied runtime code or a Pipecat upgrade. The existing Executive buffers its actual first ADK response with a private C/I/W completion marker. Incomplete speech has no Tool dispatch, final transcript, or history write; complete responses are consumed once through ordinary ADK authority. Unlike the reference, missing markers fail closed and expiry discards rather than prompting or executing."
     },
-    "discord_transport": {
-      "repository": "https://github.com/discordjs/discord.js",
-      "packages": {
-        "discord.js": "14.27.0",
-        "@discordjs/voice": "0.19.2",
-        "@discordjs/opus": "0.10.0",
-        "@snazzah/davey": "0.1.12"
-      },
-      "licenses": {
-        "discord.js": "Apache-2.0",
-        "@discordjs/voice": "Apache-2.0",
-        "@discordjs/opus": "MIT",
-        "@snazzah/davey": "MIT"
-      },
-      "lockfile": "obsidience/discord/package-lock.json",
-      "lockfile_sha256": "13c333c1e5bd6f465e32d2575acbcc224bc04054650ff85cf31491cc97389c98",
-      "integration": "Optional official bot Gateway and DAVE per-member audio transport. Discord.js owns Discord connections; native Obsidience Agent ADK owns reasoning, dedicated ledger and Hindsight bank. Existing speech owner shares loaded models with isolated member decoder state. FFmpeg converts PCM and admitted file audio; no video sender, selfbot or account token."
-    },
-    "discord_graph_camera": {
-      "dependencies": {
-        "v4l2loopback": {
-          "version": "0.15.4",
-          "repository": "https://github.com/v4l2loopback/v4l2loopback",
-          "license": "GPL-2.0-or-later"
-        },
-        "websockets": {
-          "version": "17.1",
-          "repository": "https://github.com/python-websockets/websockets",
-          "license": "BSD-3-Clause"
-        },
-        "ffmpeg": {
-          "version": "9.0.2",
-          "repository": "https://git.ffmpeg.org/ffmpeg.git",
-          "license": "GPL-3.0-only"
-        },
-        "microsoft-edge": {
-          "version": "148.0.3967.96",
-          "documentation": "https://learn.microsoft.com/en-us/microsoft-edge/devtools/protocol/",
-          "license": "LicenseRef-Microsoft-Edge"
-        }
-      },
-      "integration": "System dependencies invoked without redistribution. A dedicated ephemeral headless Edge page uses AMD-only ANGLE/Vulkan to render the standalone Discord Knowledge and Hindsight graphs, CDP viewport frames feed FFmpeg and v4l2loopback. No desktop capture, audio, existing profile, general trace or bot-account video."
-    },
     "yt_dlp": {
       "repository": "https://github.com/yt-dlp/yt-dlp",
       "version": "2026.8.19",
@@ -1108,6 +1065,23 @@
       "installer": "obsidience/scripts/install-optimization",
       "dependency_lock": "obsidience/harness/requirements-optimization.txt",
       "integration": "Pinned upstream Propose-Probe-Compose recursion and evidence/prompt/tree functions behind the existing Heimdall Audit capability. Obsidience supplies a reserved-model proposer, isolated ADK trials and independent acceptance. The local patch admits Python 3.14, adds source provenance to the wheel and disables implicit working-directory dotenv loading. Upstream CLI executors, provider caches, domain scheduler, grader and mutable experience-library writer are not used. AutoSaddler durable candidates, trials and rollback engine are retained. See docs/harness2.md for boundaries and upstream issue research."
+    },
+    "gamemode": {
+      "repository": "https://github.com/FeralInteractive/gamemode",
+      "version": "1.8.2",
+      "revision": "1.8.2",
+      "license": "BSD-3-Clause",
+      "integration": "Installed system dependency, unmodified. The session game observer uses the public GameMode PID-FD supervisor D-Bus interface; native GameMode owns process tuning and first-game/last-game hooks. No upstream source copied.",
+      "reference_files": [
+        "lib/client_impl.c",
+        "daemon/gamemode-dbus.c",
+        "daemon/gamemode-context.c",
+        "example/gamemode.ini"
+      ],
+      "files": [
+        "obsidience/shell/session/game-mode",
+        "obsidience/shell/systemd/obsidience-game-mode-profile.service"
+      ]
     }
   }
 }

@@ -7,8 +7,9 @@ obsidience:
   tool: '[[Tools/tv.control]]'
   owner_maintained: true
 ---
-
 ## Runtime
+
+To mirror the game or video already playing on the USB-C bottom screen, make one native `tv.control` call with `{"action":"mirror","surface":"usb-c"}`. This sends the entire USB-C screen and Microsoft Edge playback audio together to the registered TV, waking it if needed. It does not need a browser URL or a programme search. Do not pass the game title to `play` or speak a Tool invocation as ordinary text. Report success only with verified mirror playback. `stop` ends mirroring; pause or resume the source in Edge. TV volume and mute still work. A fresh observation is needed to name what is actually showing.
 
 For "put <movie or show> on" or "watch <title>", call `play` with the title as
 `query` and no `app`: it plays from the owner's Media server in one call. A
@@ -86,7 +87,7 @@ highlights, commentary or a score feed does not establish that the requested liv
 event is playing. If no exact source is available, report that blocker or ask the
 owner to choose an alternative; never shorten the query to obtain a different programme.
 
-For content currently in Edge, observe the exact current browser window first.
+When opening browser content independently instead of mirroring, observe the exact current browser window first.
 Use only a supported exact URL established by that observation; an earlier cast
 URL does not identify the current page. If the current source cannot be read or
 is unsupported, report that limitation instead of searching for a substitute.

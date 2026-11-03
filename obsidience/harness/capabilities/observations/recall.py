@@ -10,7 +10,8 @@ async def execute(args: dict, context: dict) -> str:
     from obsidience.harness.execution.native_turn import recall_reply
 
     agent, _allowed = execution_scope(context, resolver())
-    result = await MEMORY.recall(agent.ref, args["query"], timeout=6, budget="mid")
+    result = await MEMORY.recall(agent.ref, args["query"], timeout=6, budget="mid",
+                                 scope=context.get("_memory_scope", ""))
     refs = [row["ref"] for row in result.get("memories", [])]
     if refs:
         activity.emit_operation("read", "returned", refs, label="Hindsight recall",

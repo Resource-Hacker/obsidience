@@ -107,7 +107,6 @@ See [Realtime voice](modules/harness/voice.md) for how these fit together.
 | `OBSIDIENCE_PORT` | Overrides `port`. |
 | `OBSIDIENCE_OPTIMIZER_BACKEND` | `harness2` (default) or `autosaddler`, the retained rollback search backend for `harness.optimize`. |
 | `OBSIDIENCE_MEDIA_CONFIG` | Path of the private Media configuration (default `obsidience/state/media.json`). |
-| `OBSIDIENCE_DISCORD_CONFIG` | Path of the private Discord integration configuration (default `obsidience/state/discord.json`). |
 
 ## Example
 

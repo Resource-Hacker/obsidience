@@ -91,9 +91,10 @@ def execute(args: dict, context: dict) -> str:
         return f"Web fetch failed: {exc}"
     activation_key = research_activation_key(context)
     owner, run_id = context.get("task"), context.get("run_id")
-    if (owner == context.get("_agent_ref") == "Agents/Executive/Executive"
+    if (owner and owner == context.get("_agent_ref")
             and context.get("interactive") is True and run_id):
-        # This page supports the current conversation, not a new Learn Task.
+        # A page fetched in an Agent's own conversation (Executive chat)
+        # supports that conversation, not a new Learn Task.
         activation_key = f"source.added:research:{run_id}:{owner}"
     cancel_event = context.get("_capability_cancel_event")
 

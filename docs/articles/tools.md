@@ -40,7 +40,7 @@ Article-to-Capability provenance.
 
 <!-- catalogue:tools -->
 
-Several Tools are integration-specific (Discord, lights, TV, media, camera) and
+Several Tools are integration-specific (lights, TV, media, camera) and
 need their providers and an explicit grant before they can run in an
 installation. `session.unlock` is never inherited: it exists only where the
 installation owner grants it.

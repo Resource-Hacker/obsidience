@@ -1,12 +1,13 @@
 """Bounded public-web acquisition for the researcher.
 
-Search is discovery only. Fetch revalidates every redirect, extracts readable
-text, and commits that exact tool output to the immutable Source authority
-before returning it to the agent.
+Search is discovery only. Acquisition revalidates every redirect and extracts
+readable text. The researcher fetch commits that exact tool output to immutable
+Source; ephemeral reference consumers may acquire without publishing it.
 """
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -325,10 +326,12 @@ def _decode_response(response: httpx.Response, material: bytes) -> tuple[str, st
     return text[:MAX_FETCH_CHARS], media_type
 
 
-def fetch_web(
-    url: object, *, activation_key: str | None = None,
-    cancel_event: threading.Event | None = None,
-) -> dict:
+def acquire_web(url: object, *, cancel_event: threading.Event | None = None) -> dict:
+    """Read a bounded public page without publishing Source or Knowledge.
+
+    Ephemeral reference consumers share the researcher's acquisition safeguards;
+    only ``fetch_web`` below commits evidence to the Source authority.
+    """
     _check_cancelled(cancel_event)
     current = _public_url(url)
     with httpx.Client(
@@ -367,20 +370,27 @@ def fetch_web(
                 content, media_type = _decode_response(response, b"".join(chunks))
                 captured_at = datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                 _check_cancelled(cancel_event)
-                source = ingest_source(
-                    source_type="tool",
-                    source_ref=current,
-                    media_type=media_type,
-                    captured_at=captured_at,
-                    content=content,
-                    activation_key=activation_key,
-                )
                 return {
                     "url": current,
                     "status": response.status_code,
                     "content": content,
-                    "citation": source["citation"],
-                    "content_sha256": source["content_sha256"],
-                    "created": source["created"],
+                    "media_type": media_type,
+                    "captured_at": captured_at,
+                    "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 }
     raise WebError("web fetch failed")
+
+
+def fetch_web(
+    url: object, *, activation_key: str | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict:
+    page = acquire_web(url, cancel_event=cancel_event)
+    _check_cancelled(cancel_event)
+    source = ingest_source(
+        source_type="tool", source_ref=page["url"], media_type=page["media_type"],
+        captured_at=page["captured_at"], content=page["content"], activation_key=activation_key,
+    )
+    return {"url": page["url"], "status": page["status"], "content": page["content"],
+            "citation": source["citation"], "content_sha256": source["content_sha256"],
+            "created": source["created"]}

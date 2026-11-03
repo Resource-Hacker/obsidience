@@ -1,0 +1,223 @@
+#!/usr/bin/python3
+"""Device-scoped Brio UVC timeout recovery, driven by the kernel journal.
+
+No video/audio capture, background probing, controller reset or app restart.
+The existing OBSBOT tracking and UMA-8 stall owners remain independent.
+"""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import subprocess
+import time
+
+STATE = Path('/var/lib/obsidience-uvc-recovery/state.json')
+LOCK = Path('/run/obsidience-uvc-recovery/owner.lock')
+BOOT = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+FAULT = re.compile(r'^uvcvideo (\d+-\d+(?:\.\d+)*):\d+\.\d+: Failed to set UVC probe control : -110 \(exp\. 26\)\.$')
+_pending: list[subprocess.Popen] = []
+
+
+def emit(status: str, **fields) -> None:
+    print(json.dumps({'status': status, **fields}, separators=(',', ':')), flush=True)
+
+
+def identity(port: str) -> dict:
+    if not re.fullmatch(r'\d+-\d+(?:\.\d+)*', port):
+        raise ValueError('invalid USB port identity')
+    path = Path('/sys/bus/usb/devices') / port
+    fields = {key: (path / key).read_text().strip() for key in ('idVendor', 'idProduct', 'busnum', 'devnum')}
+    if (fields['idVendor'], fields['idProduct']) != ('046d', '0946'):
+        raise ValueError('device is outside the Brio recovery policy')
+    serial = (path / 'serial').read_bytes() if (path / 'serial').exists() else b''
+    return {'boot': BOOT, 'port': port, 'serial_sha256': hashlib.sha256(serial).hexdigest(), **fields}
+
+
+def run(command: list[str], timeout: float) -> tuple[str, str]:
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               text=True, start_new_session=True)
+    try:
+        output, _ = process.communicate(timeout=timeout)
+        return ('ok' if process.returncode == 0 else 'failed'), output
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        try:
+            process.communicate(timeout=1)
+        except subprocess.TimeoutExpired:
+            # A kernel-uninterruptible USB request cannot be killed in userspace.
+            # Keep its generation latched; never queue another recovery behind it.
+            _pending.append(process)
+            return 'kernel_wait', ''
+        return 'timeout', ''
+
+
+def drain_pending() -> bool:
+    """Drain the original killed probe after reset; never queue a replacement behind it."""
+    for process in list(_pending):
+        try:
+            process.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            continue
+        _pending.remove(process)
+    return not _pending
+
+
+def video_node(expected: dict) -> Path:
+    device = (Path('/sys/bus/usb/devices') / expected['port']).resolve(strict=True)
+    for candidate in sorted(Path('/sys/class/video4linux').glob('video*')):
+        if ((candidate / 'device').resolve().is_relative_to(device)
+                and (candidate / 'index').read_text().strip() == '0'):
+            return Path('/dev') / candidate.name
+    raise ValueError('Brio capture interface is unavailable')
+
+
+def verify(expected: dict) -> str:
+    try:
+        if identity(expected['port']) != expected:
+            return 'identity_changed'
+        node = video_node(expected)
+        status, output = run(['/usr/bin/v4l2-ctl', '--device', str(node),
+                              '--try-fmt-video=width=1280,height=720,pixelformat=MJPG'], 7)
+        if status != 'ok':
+            return status
+        if identity(expected['port']) != expected:
+            return 'identity_changed'
+        if (not re.search(r'Width/Height\s*:\s*1280/720', output)
+                or not re.search(r"Pixel Format\s*:\s*'MJPG'", output)):
+            return 'format_unconfirmed'
+        return 'ok'
+    except (OSError, ValueError):
+        return 'unavailable'
+
+
+def load_state() -> dict:
+    try:
+        value = json.loads(STATE.read_text())
+        return value if isinstance(value, dict) else {}
+    except FileNotFoundError:
+        return {}
+
+
+def save_state(value: dict) -> None:
+    temporary = STATE.with_suffix('.new')
+    temporary.write_text(json.dumps(value, indent=2) + '\n')
+    temporary.chmod(0o600)
+    temporary.replace(STATE)
+
+
+def recover(port: str, event_at: float) -> None:
+    try:
+        expected = identity(port)
+    except (OSError, ValueError):
+        return
+    state = load_state()
+    previous = state.get(port, {})
+    same = previous.get('identity') == expected
+    # Queued pre-recovery errors cannot start another incident. A failed attempt
+    # stays latched for this exact endpoint generation, including service restarts.
+    if same and (event_at <= previous.get('finished', 0)
+                 or previous.get('status') in ('checking', 'recovering', 'failed', 'repeated_fault')
+                 or previous.get('attempted') is not None):
+        if event_at > previous.get('finished', 0) and previous.get('status') == 'recovered':
+            previous.update(status='repeated_fault', finished=time.monotonic())
+            save_state(state)
+            emit('repeated_fault_latched', port=port)
+        return
+    state[port] = {'identity': expected, 'status': 'checking', 'finished': time.monotonic()}
+    save_state(state)
+    before = verify(expected)
+    if before == 'ok':
+        # An isolated timeout has already cleared; preserve the healthy device.
+        state[port] = {'identity': expected, 'status': 'self_recovered', 'finished': time.monotonic()}
+        save_state(state)
+        emit('self_recovered', port=port)
+        return
+    if before in ('identity_changed', 'unavailable'):
+        emit('unavailable', port=port, verification=before)
+        return
+    attempted = time.monotonic()
+    state[port] = {'identity': expected, 'status': 'recovering', 'attempted': attempted,
+                   'finished': attempted, 'before': before}
+    save_state(state)  # Persist the attempt before touching the device.
+    if identity(port) != expected:
+        return
+    target = f"{int(expected['busnum']):03d}/{int(expected['devnum']):03d}"
+    reset, _ = run(['/usr/bin/usbreset', target], 8)
+    drained = drain_pending()
+    if reset == 'ok' and drained:
+        run(['/usr/bin/udevadm', 'settle', '--timeout=6'], 7)
+        try:
+            after_identity = identity(port)
+            after = ('identity_changed' if after_identity['serial_sha256'] != expected['serial_sha256']
+                     else verify(after_identity))
+        except (OSError, ValueError):
+            after_identity, after = expected, 'unavailable'
+    else:
+        after_identity, after = expected, ('kernel_wait' if not drained else reset)
+    state[port] = {'identity': after_identity, 'status': 'recovered' if after == 'ok' else 'failed',
+                   'attempted': attempted, 'finished': time.monotonic(), 'reset': reset, 'verification': after,
+                   'pending_kernel_calls': len(_pending)}
+    save_state(state)
+    emit(state[port]['status'], port=port, reset=reset, verification=after, pending_kernel_calls=len(_pending),
+         recovery_kind='logical_device_reset_not_power_cut')
+
+
+def watch() -> None:
+    child = subprocess.Popen(['/usr/bin/journalctl', '-k', '--follow', '--lines=0', '--output=json',
+                              '--grep=^uvcvideo .*Failed to set UVC probe control : -110'],
+                             stdout=subprocess.PIPE, text=True)
+    emit('watching', policy='Brio_046d_0946_only', probing='on_fault_only')
+    try:
+        for line in child.stdout:
+            record = json.loads(line)
+            match = FAULT.fullmatch(str(record.get('MESSAGE', '')))
+            if not match or record.get('_BOOT_ID') != BOOT.replace('-', ''):
+                continue
+            at = int(record.get('__MONOTONIC_TIMESTAMP', 0)) / 1_000_000
+            if not 0 <= time.monotonic() - at <= 60:
+                continue
+            try:
+                recover(match[1], at)
+            except (OSError, ValueError) as error:
+                emit('recovery_unavailable', error_type=type(error).__name__)
+        raise RuntimeError('kernel journal subscription ended')
+    finally:
+        child.terminate()
+        try:
+            child.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=1)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--verify', metavar='USB_PORT', help='one format handshake; never captures or resets')
+    parser.add_argument('--status', action='store_true', help='read the persistent recovery ledger')
+    args = parser.parse_args()
+    if args.status:
+        print(json.dumps(load_state(), indent=2))
+        return
+    LOCK.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with LOCK.open('a') as owner:
+        fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.verify:
+            result = verify(identity(args.verify))
+            emit('verified' if result == 'ok' else 'unavailable', port=args.verify, verification=result)
+            raise SystemExit(0 if result == 'ok' else 1)
+        STATE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+        try:
+            watch()
+        except KeyboardInterrupt:
+            pass
+
+
+if __name__ == '__main__':
+    main()

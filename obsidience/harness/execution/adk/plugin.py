@@ -37,7 +37,7 @@ from ..capability_core import (
     OBSERVATION_CONTEXT_FIELD, CapabilityExecution, foreground_checkpoint, observation_text, run_capability,
 )
 from ..native_turn import (
-    NO_TOOL_CALL_FEEDBACK, OUTPUT_LIMIT_FEEDBACK, adopt_fast_lane, argument_diagnostic, settle_model_step,
+    NO_TOOL_CALL_FEEDBACK, OUTPUT_LIMIT_FEEDBACK, adopt_fast_lane, argument_diagnostic, imitates_tool, settle_model_step,
     step_budget_notice, task_tool_schemas, tool_schemas, unavailable_text,
 )
 from ...config import CONFIG
@@ -52,8 +52,6 @@ ACKNOWLEDGE_AFTER_SECS = 1.5
 # Tools whose receipts are usually slower than that (30 days to 2026-10-19:
 # web.search p50 2.2 s, computer.replay 2.1 s, media.acquire 3.1 s) say it as they start.
 SLOW_TOOLS = frozenset({'web.search', 'computer.replay', 'media.acquire'})
-
-
 def step_budget(evaluation) -> int:
     """The activation's model decisions: the executor limit, or an evaluation trial's own."""
     if evaluation is None:
@@ -134,11 +132,9 @@ class AgentPlugin(BasePlugin):
         self.task_mode = task.kind != 'agent'
         self.spec, self.effort, self.system, self.agent_name = spec, effort, system, agent_name
         self.evaluation = evaluation
-        # Tasks and instruction trials, Bard (a bound Discord conversation) and the
-        # Executive each keep their own llama.cpp slot and prompt cache.
-        self.model_slot = (model_runtime.TASK_SLOT if self.task_mode or evaluation is not None
-                           else model_runtime.BARD_SLOT if sessions.CONVERSATION_BINDING.get() is not None
-                           else model_runtime.EXECUTIVE_SLOT)
+        # Tasks and the Executive keep independent leased prompt caches.
+        self.model_lane = (model_runtime.TASK_LANE if self.task_mode or evaluation is not None
+                           else model_runtime.EXECUTIVE_LANE)
         self.prepared_speech = prepared_speech
         self.max_steps = step_budget(evaluation)
         self.emit = trace_emitter(evaluation)
@@ -174,6 +170,8 @@ class AgentPlugin(BasePlugin):
         self.step_calls = 0
         self._last_call: tuple | None = None
         self._acknowledgement: asyncio.Task | None = None
+        # A sanitized replacement response, when a native step is rejected.
+        self._replacement: LlmResponse | None = None
 
     # Model reservation -------------------------------------------------
     async def adopt_lease(self):
@@ -297,7 +295,7 @@ class AgentPlugin(BasePlugin):
         from ..completion import cue_only_summary, single_command
         from ...capabilities.registry import READ_ONLY_CAPABILITIES
         ctx = self.ctx
-        if (self.task_mode or self.evaluation is not None or '_discord' in ctx
+        if (self.task_mode or self.evaluation is not None
                 or ctx.get('_verified_command') is None or self.ex.done or self.steered
                 or self.steering_pending or self.step_calls != 1 or outcome.kind != 'returned'
                 or not self.trace or self.trace[-1].get('tool') != name
@@ -370,21 +368,6 @@ class AgentPlugin(BasePlugin):
                 if acknowledgement is not None:
                     acknowledgement.cancel()  # Words already on their way are not cut.
             self._last_call = (name, args, outcome)
-            if self.ctx.get('_discord') and name != 'task.complete':
-                # A corrected call must actually run: its prerequisite may now
-                # be satisfied. Bound only identical proven non-effect failures.
-                receipt = sessions._receipt_object(outcome.observation) or {}
-                prefix = 'correction:' + hashlib.sha256(
-                    json.dumps([name, args], sort_keys=True).encode()).hexdigest() + ':'
-                if (receipt.get('status') == 'failed' and receipt.get('correction_allowed') is True
-                        and receipt.get('delivery') == 'not_dispatched' and receipt.get('effect_applied') is False):
-                    reason = str(receipt.get('failure') or 'Capability prerequisite rejected')
-                    self.strike(prefix + hashlib.sha256(reason.encode()).hexdigest(),
-                                'Repeated request rejected before playback: ' + reason)
-                else:
-                    for key in list(self.strikes):
-                        if key.startswith(prefix):
-                            del self.strikes[key]
             if queries:
                 current = self.ctx.get('_vault_searches', {})
                 fresh = [current.get(query) for query in queries]
@@ -420,7 +403,7 @@ class AgentPlugin(BasePlugin):
         over the owner or after reply audio began; STOP or barge-in cancels the
         run and with it this timer.
         """
-        if self.voice is None or name == 'task.complete' or '_discord' in self.ctx:
+        if self.voice is None or name == 'task.complete':
             return None
         delay = 0.0 if name in SLOW_TOOLS else ACKNOWLEDGE_AFTER_SECS
         voice = self.voice
@@ -431,6 +414,9 @@ class AgentPlugin(BasePlugin):
 
         self._acknowledgement = asyncio.create_task(acknowledge(), name='obsidience-tool-acknowledgement')
         return self._acknowledgement
+
+    # Staged stream replay (owner, 2026-10-27) --------------------------
+
 
     async def _simulate(self, name: str, args: dict) -> dict:
         """An evaluation trial's answer to one admitted call; the model still chose it."""
@@ -552,7 +538,8 @@ class AgentPlugin(BasePlugin):
                 # that later breaks the protocol, fails or is cancelled is
                 # retracted, as is one completion rejects; a Tool-call response
                 # voices nothing early.
-                self.voice.begin_step(eligible=self.ctx.get('_reflex_command_verified') is not True)
+                self.voice.begin_step(eligible=self.ctx.get('_reflex_command_verified') is not True,
+                                      advertised=self.advertised)
             try:
                 response = await prepared.consume(self, self.voice.feed if self.voice is not None else None)
             except BaseException:
@@ -570,7 +557,7 @@ class AgentPlugin(BasePlugin):
             # The model already generated this exact response. ADK appends its
             # sanitized content and dispatches native calls through normal hooks.
             await self._finish_step(response, from_choice=True)
-            return response
+            return self._take_replacement() or response
         await self.hold_model(self.adopt_lease)
         fields = {'step': self.ex.step + 1, 'call_id': f'{self.run}:model:{self.model_steps}'}
         self.emit_model(f'{self.agent_name} model started', 'started', fields, engine=sessions.BACKEND)
@@ -578,7 +565,8 @@ class AgentPlugin(BasePlugin):
         self._step = {'fields': fields, 'metrics': metrics, 'started': time.monotonic(), 'menu': None}
         if self.voice is not None:
             # A verified reflex command keeps cue-only confirmation.
-            self.voice.begin_step(eligible=self.ctx.get('_reflex_command_verified') is not True)
+            self.voice.begin_step(eligible=self.ctx.get('_reflex_command_verified') is not True,
+                                  advertised=self.advertised)
         # The shared projection over the history ADK built from session events.
         conversation_id = (self.ctx.get('params') or {}).get('conversation_id')
         history = [{'role': 'system', 'content': [{'type': 'text', 'text': self.system}]},
@@ -600,7 +588,7 @@ class AgentPlugin(BasePlugin):
         else:
             schemas = tool_schemas(self.advertised)
         payload = native.request_payload(wire, self.spec, self.effort, schemas, task=self.task_mode)
-        payload.update(model_runtime.slot_fields(self.spec, self.model_slot))
+        payload.update(model_runtime.slot_fields(self.spec, self.model_lane))
         if (captured := getattr(self.evaluation, 'wire_messages', None)) is not None:
             # A contract trial evaluates the exact captured provider prompt, which
             # already carries its model-family guidance; never append it twice.
@@ -693,9 +681,13 @@ class AgentPlugin(BasePlugin):
             llm_response = llm_response.model_copy(update={
                 'content': types.Content(role='model', parts=kept) if kept else None})
             await self._finish_step(llm_response)
-            return llm_response
+            return self._take_replacement() or llm_response
         await self._finish_step(llm_response)
-        return None
+        return self._take_replacement()
+
+    def _take_replacement(self) -> LlmResponse | None:
+        replacement, self._replacement = self._replacement, None
+        return replacement
 
     async def _finish_step(self, response: LlmResponse, *, from_choice: bool = False) -> None:
         self.generating.clear()
@@ -729,6 +721,13 @@ class AgentPlugin(BasePlugin):
         adopt_fast_lane(step['menu'], metrics, self.ctx)
         self.emit_model(f'{self.agent_name} model returned', 'result', step['fields'], metrics=metrics)
         self.step_calls = len(calls)
+        imitation = not calls and reason == 'stop' and imitates_tool(text, self.advertised)
+        if imitation:
+            # The correction stays controller feedback; rejected text is not an
+            # ADK model event, spoken answer or accepted completion.
+            self._replacement = LlmResponse()
+            if self.voice is not None:
+                await self.voice.retract(halt=True)
         if self.voice is not None:
             if calls:
                 await self.voice.feed({'type': 'block-start', 'blockType': 'tool-call'})
@@ -758,6 +757,7 @@ class AgentPlugin(BasePlugin):
         self.feedback = await settle_model_step(self, self.operate, text, bool(calls), reason,
                                                 allowed=self.advertised, ctx=self.ctx, trace=self.trace,
                                                 emit=self.emit, voice=self.voice)
+
 
     async def release(self) -> None:
         """Release what this activation acquired: an unadopted reservation and its lease."""

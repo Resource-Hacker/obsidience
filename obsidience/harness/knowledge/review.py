@@ -30,6 +30,8 @@ from .vault import (
     Note,
     Resolver,
     NOTE_WRITE_LOCK,
+    SOURCE_DIRS,
+    SYSTEM_DIRS,
     iter_notes,
     load_note,
     mutate_note_metadata,
@@ -320,6 +322,65 @@ def sync_health_notifications(findings: list[dict]) -> None:
             "link_changes": None, "link_evidence": [], "evidence_warning": "",
         })
     INDEX.sync_review_notifications("health", rows)
+
+
+_SOURCE_CHANGE_SIG: tuple | None = None
+
+
+def sync_source_change_notifications(notes: list[Note]) -> None:
+    """Flag accepted Articles whose cited web Source has a newer captured version.
+
+    A citation pins ``source://<id>`` (one content version). When that URL is
+    re-fetched with changed content a new Source id supersedes it, yet the
+    Article still cites the stale version. Surface each such Article for the
+    owner's Review until it is re-reviewed against the current capture; the older
+    evidence is retained. System Articles are excluded (their publisher refreshes
+    them). Items clear automatically once the citation is updated or removed.
+    """
+    from .index import INDEX
+    global _SOURCE_CHANGE_SIG
+
+    superseded: dict[str, dict] = {}
+    for group in INDEX.changed_web_sources():
+        for old_id in group["superseded_ids"]:
+            superseded[old_id] = group
+    # Changed web Sources are always present (polled feeds historically), so gate
+    # the Article-body parse on a cheap signature; recompute only when the
+    # superseded set or a note actually changed since the last successful sync.
+    signature = (frozenset((old, group["current_id"]) for old, group in superseded.items()),
+                 tuple((note.path, note.mtime) for note in notes))
+    if signature == _SOURCE_CHANGE_SIG:
+        return
+    rows = []
+    if superseded:
+        for note in notes:
+            parts = note.path.split("/")
+            if parts[0] in (*SYSTEM_DIRS, *SOURCE_DIRS) or any(part.startswith(".") for part in parts):
+                continue
+            cited = {ref[len("source://"):]
+                     for ref, _line, _excerpt in body_link_locations(note.body, note.path, include_sources=True)
+                     if ref.startswith("source://")}
+            for old_id in sorted(cited & superseded.keys()):
+                group = superseded[old_id]
+                rows.append({
+                    "file": f"source-changed:{note.path}:{old_id}",
+                    "review_class": "source-changed", "action": "attention",
+                    "title": note.title + " cites a changed source",
+                    "target": note.path, "task": "", "agent": "Heimdall", "run_id": "",
+                    "reason": f"This Article cites {group['source_ref']}, whose captured content has since changed.",
+                    "approvable": False, "blocked_reason": "",
+                    "body_preview": (
+                        f"[{note.title}]({note.path}) cites `source://{old_id}` ({group['source_ref']}). "
+                        f"That page was re-fetched and its content changed; the current capture is "
+                        f"`source://{group['current_id']}` (captured {group['current_captured_at']}). "
+                        "Re-review the Article against the current version and update or reaffirm the "
+                        "citation. The older evidence is retained."),
+                    "cited_source_id": old_id, "current_source_id": group["current_id"],
+                    "source_ref": group["source_ref"],
+                    "link_changes": None, "link_evidence": [], "evidence_warning": "",
+                })
+    INDEX.sync_review_notifications("source-changed", rows)
+    _SOURCE_CHANGE_SIG = signature
 
 
 def acknowledge_notification(identity: str) -> dict:

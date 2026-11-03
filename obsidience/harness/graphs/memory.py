@@ -1,9 +1,8 @@
 """The Memory pane's projection of one Hindsight bank's native graph.
 
 Provider reads go through the memory adapter (``MEMORY.graph_read``); this
-module owns only the display projection and its per-bank delta cursors. The
-API route and the Discord presentation both consume ``project``. Run it in a
-worker thread: a complete historical bank is large.
+module owns only the display projection and its per-bank delta cursors.
+The API route consumes ``project``. Run it in a worker thread: a complete historical bank is large.
 """
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ class MemoryGraphUnavailable(RuntimeError):
 # Stats that move whenever Hindsight writes, links or consolidates a bank.
 MEMORY_PROBE = ("total_nodes", "total_links", "total_documents", "total_observations",
                 "last_memory_write_at", "last_consolidated_at")
-
 
 
 class MemoryView:
@@ -111,10 +109,7 @@ def _edge_dicts(edges) -> list[dict]:
             for source, target, kind, weight, color in edges]
 
 
-
 MEMORY_VIEWS: dict[str, MemoryView] = {}
-
-
 
 
 def project(bank: str, q: str = "", limit: int | None = None, since: str = "") -> dict:

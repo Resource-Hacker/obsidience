@@ -152,6 +152,15 @@ hl.window_rule({
     tile = true,
 })
 
+-- Deadlock must open on the gaming Surface even when a side panel has focus.
+hl.window_rule({
+    name = "obsidience-deadlock-samsung",
+    match = { initial_class = "^steam_app_1422450$" },
+    monitor = surfaces.selector("samsung"),
+    workspace = "1",
+    fullscreen = true,
+})
+
 -- Native Wayland games can drop their fullscreen request on focus loss.
 -- Keep Samsung adaptive while Retail or Forever is mapped there; restore fullscreen-only
 -- desktop policy when it closes or moves away. Side outputs retain vrr = 0.
@@ -207,9 +216,25 @@ for _, name in ipairs({ "libvirtualhid-keyboard", "libvirtualhid-keyboard-1",
     hl.device({ name = name, enabled = false })
 end
 
+-- XWayland has its own output order and primary hint. Fullscreen X11 games
+-- must select the Samsung Surface even when side panels enumerate before it.
+local function syncXWaylandPrimary()
+    for _, monitor in ipairs(hl.get_monitors()) do
+        if surfaces.surface_for(monitor) == "samsung"
+                and monitor.name:match("^[%w._-]+$") then
+            hl.exec_cmd("xrandr --output " .. monitor.name .. " --primary")
+            return
+        end
+    end
+end
+
 hl.on("hyprland.start", function()
+    syncXWaylandPrimary()
     hl.exec_cmd("systemctl --user start --no-block obsidience-shell-session.target")
 end)
+for _, event in ipairs({ "monitor.added", "monitor.removed", "monitor.layout_changed" }) do
+    hl.on(event, syncXWaylandPrimary)
+end
 
 hl.bind("SUPER + RETURN", hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }))
 hl.bind("SUPER + SHIFT + RETURN", hl.dsp.exec_cmd("uwsm app -- kitty"))

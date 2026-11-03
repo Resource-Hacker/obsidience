@@ -25,6 +25,8 @@ from ..knowledge.index import INDEX
 from ..capabilities.registry import MODEL_RESOURCE_TOOLS, READ_ONLY_CAPABILITIES
 
 PRIVATE_IMAGE_FIELD = "_private_image_png"
+# Labelled frames one Tool result may attach for screen replay.
+MAX_PRIVATE_FRAMES = 24
 PRIVATE_OBSERVATION_FIELD = "_private_observation_lease"
 OBSERVATION_CONTEXT_FIELD = "_computer_observation_lease"
 INTERRUPTED = "Interrupted while the Tool was in flight; outcome is unknown. Do not replay."
@@ -368,7 +370,6 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         }
         observation = json.dumps(result_object, sort_keys=True)
     elif ((name in {"camera.observe", "computer.observe", "computer.act"}
-           or name == "discord.observe" and args.get("action") == "observe"
            or name == "tv.control" and args.get("action") not in {
                "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
                "notice", "stop", "vod"})
@@ -409,7 +410,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                 if private_value is not None:
                     if isinstance(private_value, bytes):
                         private_image_png = private_value
-                    elif (isinstance(private_value, list) and 0 < len(private_value) <= 12 and all(
+                    elif (isinstance(private_value, list) and 0 < len(private_value) <= MAX_PRIVATE_FRAMES and all(
                             isinstance(frame, tuple) and len(frame) == 2 and isinstance(frame[0], str)
                             and isinstance(frame[1], bytes) for frame in private_value)):
                         private_frames = tuple(private_value)
@@ -530,23 +531,6 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         # The TV adapter has already exhausted its bounded transport/read
         # attempt. Preserve the failure and end this turn's effects.
         ex.ctx["_tv_control_failed"] = True
-        ex.allowed = ["task.complete"]
-    if (name == "discord.control" and args.get("action") not in {"status", "channels"}
-            and call_status in {"returned", "error"}
-            and (not isinstance(result_object, dict) or result_object.get("status") != "completed")
-            and not (isinstance(result_object, dict) and result_object.get("correction_allowed") is True
-                     and result_object.get("delivery") == "not_dispatched"
-                     and result_object.get("effect_applied") is False)):
-        # A failed/uncertain effect ends this activation's effects. A proven
-        # pre-dispatch non-effect may still correct its missing prerequisite.
-        ex.ctx["_discord_control_failed"] = args["action"]
-        ex.allowed = ["task.complete"]
-    if (name == "discord.admin" and args.get("action") == "kick"
-            and "_discord_admin_attempt" in ex.ctx):
-        # One kick attempt ends this activation's effects, including a native
-        # rejection or uncertain transport result. Never retry another target.
-        if not isinstance(result_object, dict) or result_object.get("status") != "completed":
-            ex.ctx["_discord_admin_failed"] = True
         ex.allowed = ["task.complete"]
     if name == "media.acquire" and (not isinstance(result_object, dict)
                                     or result_object.get("status") != "completed"

@@ -87,7 +87,7 @@ flowchart LR
 | `harness/memory/README.md` | Deployment, provider configuration, recovery and rollback |
 | `harness/memory/requirements.txt` | The isolated server environment |
 | `scripts/patches/hindsight/` | Patches 0001 to 0012 with a README; each is recorded with preimage and installed hashes in the lock |
-| `harness/graphs/memory.py` | The Memory pane and Discord projection of a bank graph |
+| `harness/graphs/memory.py` | The Memory pane projection of a bank graph |
 | `harness/interfaces/api/routes/turns.py` | `POST /api/turns/complete` intake for external completed turns |
 | `harness/interfaces/api/routes/memory.py` | Status and the optional private local-model port for Hindsight |
 | `harness/capabilities/observations/` | The `observations.recall` and `observations.retain` Tools |

@@ -51,7 +51,7 @@ PROJECT = "obsidience"  # The published project name; the provider's is the chec
 # Commits about the owner's own devices, accounts, media, games or bots are
 # left out; the rest describe the software itself.
 PRIVATE = re.compile(
-    r"discord|bard|squanch|omnibot|youtube|pluto|stremio|torbox|prowlarr|media|music|series|season|"
+    r"discord|bard|squanch|omnibot|persona|hottub|youtube|pluto|stremio|torbox|prowlarr|media|music|series|season|"
     r"\btv\b|fire ?os|moonlight|sunshine|snapcast|android|edge\b|browser|camera|webcam|obsbot|brio|"
     r"kinect|vr\b|wivrn|steam|wow\b|warcraft|game|tft|teamfight|lights?\b|wiz\b|visualizer|"
     r"rtx|4080|4000|ada\b|igpu|gpu|nvidia|cuda|uma-?8|minidsp|samsung|monitor|display|hdmi|dp-\d|usb|"
@@ -189,11 +189,16 @@ def fetch_layout() -> dict:
 
 def public_layout(layout: dict) -> dict:
     """Only nodes of tracked files (and their file-less symbols), under the published project name."""
-    tracked = set(git("ls-files").splitlines())
+    tracked = {path for path in git("ls-files").splitlines() if (REPO / path).is_file()}
     folders = {str(Path(path).parents[i]) for path in tracked for i in range(len(Path(path).parents) - 1)}
     keep = {}
     for node in layout["nodes"]:
         path = node.get("file_path") or ""
+        # Bot transports and their identities are outside the public snapshot.
+        if re.search(r"discord|omnibot|squanchbot|\bbard\b|hottub|persona[-_./]|[-_./]persona",
+                     " ".join((path, node.get("qualified_name") or "", node.get("name") or "")),
+                     re.IGNORECASE):
+            continue
         if node.get("label") == "Project":
             keep[node["id"]] = {**node, "name": PROJECT, "qualified_name": PROJECT}
         elif path in tracked or (node.get("label") == "Folder" and path in folders):

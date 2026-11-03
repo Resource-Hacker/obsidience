@@ -87,6 +87,6 @@ Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
 `obsidience/shell/systemd/`, `obsidience/tv/systemd/` and the Media units in
 `obsidience/media/`. An installation copies them into `~/.config/systemd/user`.
 
-Optional integrations outside the four Modules (Discord, room lights) live in
-`obsidience/discord/` and `obsidience/lights/` and use the same Agent, Tool and
+Optional room lights outside the four Modules live in
+`obsidience/lights/` and use the same Agent, Tool and
 receipt contracts.

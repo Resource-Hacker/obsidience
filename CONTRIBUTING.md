@@ -55,7 +55,7 @@ Task, Runbook, Skill or Tool; similarity, links and model output never do.
 | Shell's Edge Cast client | `obsidience/browser/edge/` |
 | Media: catalogue service units and provider launchers | `obsidience/media/` |
 | TV: PC-hosted TV session, its units and the Fire TV agent | `obsidience/tv/` |
-| Optional Discord and lights integrations | `obsidience/discord/`, `obsidience/lights/` |
+| Optional lights integration | `obsidience/lights/` |
 | Starter Agents, Tasks, Runbooks, Skills and Tools | `obsidience/defaults/vault/Agents/`, `Tasks/`, `Runbooks/`, `Skills/`, `Tools/` |
 | Starter Knowledge | `obsidience/defaults/vault/<subject>/`, for example `Architecture/` |
 | Unit files | Beside the code that owns them (`harness/systemd/`, `shell/systemd/`, `tv/systemd/`, `media/`) |

@@ -548,22 +548,23 @@ def model_client() -> str:
     return value
 
 
-def route(spec, effort: str, slot: int | None = None):
-    """The ADK model route for one model, reasoning effort and caller slot.
+def route(spec, effort: str, lane: str | None = None):
+    """The ADK model route for one model, reasoning effort and caller lane.
 
     Carries what the native transport sends: the served model id (so tool
     results keep the template's native ``tool`` role), output cap,
     temperature, single Tool call per step, template thinking switch, the
-    caller's llama.cpp slot (``runtime.slot_fields``; the Executive's unless
-    named) and the engine's exact input ceiling, whose acknowledgement every
+    caller lane's leased llama.cpp slot (``runtime.slot_fields``; the Executive's
+    unless named) and the engine's exact input ceiling, whose acknowledgement every
     response must carry.
     ``local`` streams through the API's httpx pool (``LocalLlm``); ``litellm``
     is ADK's LiteLlm route. Both expose the same ``_additional_args``.
     """
     from ...models import runtime as model_runtime
-    pinned = model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_SLOT if slot is None else slot)
+    pinned = model_runtime.slot_fields(spec, model_runtime.EXECUTIVE_LANE if lane is None else lane)
+    max_tokens = spec.max_output_tokens
     kind = model_client()
-    key = (spec.id, spec.base_url, effort, kind, pinned.get('id_slot'))
+    key = (spec.id, spec.base_url, effort, kind, pinned.get('id_slot'), max_tokens)
     if key not in _routes:
         from ...config import CONFIG
         from ...models import llm
@@ -573,7 +574,7 @@ def route(spec, effort: str, slot: int | None = None):
             extra.update(reasoning_format='auto', reasoning_budget_tokens=spec.reasoning_budgets[effort])
         if spec.supports_input_token_limit:
             extra['input_token_limit'] = spec.context_tokens - spec.max_output_tokens - PROMPT_SAFETY_TOKENS
-        args = dict(max_tokens=spec.max_output_tokens, temperature=CONFIG.llm_temperature,
+        args = dict(max_tokens=max_tokens, temperature=CONFIG.llm_temperature,
                     parallel_tool_calls=False, timeout=llm.CHAT_TIMEOUT_SECONDS, extra_body=extra)
         if kind == 'local':
             _routes[key] = LocalLlm(spec.id, base_url=spec.base_url, **args)

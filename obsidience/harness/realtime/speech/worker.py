@@ -170,7 +170,9 @@ WAKE_SPOTTER_MODEL = "/var/lib/ai/models/obsidience-realtime/wake-word/computer.
 # Latest spot after the segment's VAD onset: "hey computer", spoken slowly.
 WAKE_SPOT_ONSET_SECS = 1.6
 WAKE_STRIP = " ,.!?:;—-'’\t\n"
-_WAKE_LEAD = re.compile(r"[\W_]*(?:(?:hey|hay|ok|okay)\b[\W_]*)?", re.IGNORECASE)
+# Up to two leading fillers or short recognizer scraps can precede an address.
+_WAKE_LEAD = re.compile(r"[\W_]*(?:(?:uh|um|er|oh|so|yeah|yo|well|hmm|hm|and|but|[A-Za-z]{1,2})\b[\W_]*){0,2}"
+                        r"(?:(?:hey|hay|ok|okay)\b[\W_]*)?", re.IGNORECASE)
 # Streaming ASR can spell the spoken greeting "hey" as its homophone "hay".
 _WAKE_EXPLICIT_LEAD = re.compile(r"(?<!\w)(?:hey|hay)\b[\W_]*$", re.IGNORECASE)
 # Short acknowledgements that must not interrupt a playing Realtime reply.
@@ -180,6 +182,7 @@ BACKCHANNEL_PHRASES = ("okay", "uh-huh", "mm-hmm", "yeah", "right")
 TTS_GAIN = 10.0 ** (9.0 / 20.0)
 TTS_PEAK_KNEE = 0.85
 TTS_PEAK_CEILING = 0.95
+
 # Silence before the next sentence of one streamed reply (owner, 2026-10-08:
 # gapless sentences ran together). Whole 40 ms output chunks.
 SENTENCE_PAUSE_SECS = 0.2
@@ -191,18 +194,17 @@ _SENTENCE_PAUSE_PCM = b"\0" * (round(SENTENCE_PAUSE_SECS * TTS_SAMPLE_RATE * 2 /
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]*_]*$")
 # A spoken reply that asks the owner something: "?" before any closing marks.
 _QUESTION_END = re.compile(r"\?[\"'”’»)\]}]*$")
-
-
-def _speech_pcm(samples: np.ndarray, *, gain: float = TTS_GAIN) -> bytes:
+def _speech_pcm(samples: np.ndarray, *, gain: float = TTS_GAIN,
+                knee: float = TTS_PEAK_KNEE, ceiling: float = TTS_PEAK_CEILING) -> bytes:
     boosted = samples * gain
     magnitude = np.abs(boosted)
     # A continuous soft knee protects unusually loud peaks without chunk-level
     # normalization, lookahead, or an envelope that pumps between chunks.
-    headroom = TTS_PEAK_CEILING - TTS_PEAK_KNEE
+    headroom = ceiling - knee
     protected = np.sign(boosted) * (
-        TTS_PEAK_KNEE + headroom * np.tanh((magnitude - TTS_PEAK_KNEE) / headroom)
+        knee + headroom * np.tanh((magnitude - knee) / headroom)
     )
-    boosted = np.where(magnitude > TTS_PEAK_KNEE, protected, boosted)
+    boosted = np.where(magnitude > knee, protected, boosted)
     return np.rint(boosted * 32767.0).astype("<i2").tobytes()
 
 
@@ -222,7 +224,7 @@ def turn_text_short_reply(text: str) -> bool:
     return _turn_words(text) in SHORT_REPLIES
 
 
-def smart_turn_analyzer(pending, short_reply, model_path: str | None = None):
+def smart_turn_analyzer(pending, short_reply, model_path: str | None = None, cpu_count: int = 4):
     """Load Smart Turn on CPU, or None to keep the fixed pause endpoint.
 
     A missing or unloadable model is reported once and keeps the fixed pause.
@@ -239,9 +241,10 @@ def smart_turn_analyzer(pending, short_reply, model_path: str | None = None):
             """Bound the model's verdict by silence and by the recognized text."""
 
             def __init__(self) -> None:
-                # Four ONNX threads: the stop-edge verdict is on the end-of-turn path
-                # (v3.2 int8, 8 s window: 25 ms on one thread, 9 ms on four).
-                super().__init__(smart_turn_model_path=model_path, cpu_count=4, params=SmartTurnParams(
+                # ONNX intra-op threads for the stop-edge verdict on the end-of-turn
+                # path (v3.2 int8, 8 s window: 25 ms on one thread, 9 ms on four).
+                # The desktop microphone uses four threads.
+                super().__init__(smart_turn_model_path=model_path, cpu_count=cpu_count, params=SmartTurnParams(
                     # Upstream ends any turn after this much silence past the VAD stop.
                     stop_secs=SMART_TURN_PENDING_SECS - SMART_TURN_VAD_STOP_SECS,
                     # Silero confirms onset 100 ms late; keep the first syllable.
@@ -293,33 +296,64 @@ def smart_turn_analyzer(pending, short_reply, model_path: str | None = None):
         return None
 
 
+# A name followed straight by a third-person verb is talked ABOUT ("Computer doesn't
+# speak fast"), not addressed; a vocative gets a comma or a second-person verb.
+_WAKE_MENTION_FOLLOW = re.compile(r"^\s+(?:is|isn't|was|wasn't|are|aren't|were|weren't|has|hasn't|had|does|doesn't|didn't|sounds?|sounded|speaks?|spoke|says?|said|thinks?|thought|would|wouldn't|couldn't|can't|'s|'ll|'d)(?!\w)", re.IGNORECASE)
+
+
+# "is that (actually) Computer?", "that's Computer", "was it Computer": a question or
+# statement ABOUT the name, not an address.
+_WAKE_COPULA_LEAD = re.compile(r"\b(?:is|was|isn't|wasn't|that's|it's|thats|its)\s+(?:(?:that|this|it|he|she|actually|really|still|just|even)\s+){0,3}$", re.IGNORECASE)
+
+
 def classify_wake(text: str, address: int | None, scanned: int, pattern: re.Pattern,
                   *, final: bool = False) -> tuple[str, int, int, list[str]]:
-    """Classify unaddressed wake-word mentions in one speech segment's text.
-
-    ``address`` is where an address may begin (segment start or after a pause);
-    only hey/ok/okay may precede the name there. An explicit "hey <name>"
-    address may also interrupt ongoing speech. Possessives and contractions
-    ("computer's") are never addresses. A name ending the text stays pending
-    until more text arrives, unless ``final``. Returns (decision, end, scanned,
-    rejected): accept/pending/none, the end of the name, the index up to which
-    mentions were classified, and the reasons for newly rejected mentions.
-    """
+    """Classify explicit wake addresses while rejecting mentions and possessives."""
     rejected: list[str] = []
     for match in pattern.finditer(text, scanned):
         after = text[match.end():]
+        addressed = (_WAKE_EXPLICIT_LEAD.search(text, 0, match.start()) is not None
+                     or (address is not None and match.start() >= address
+                         and _WAKE_LEAD.fullmatch(text, address, match.start()) is not None))
         if not final and after in ("", "'", "’"):
             return "pending", match.end(), scanned, rejected
         if after[:1] in ("'", "’") and after[1:2].isalnum():
             rejected.append("possessive")
-        elif (_WAKE_EXPLICIT_LEAD.search(text, 0, match.start()) is not None
-              or (address is not None and match.start() >= address
-                  and _WAKE_LEAD.fullmatch(text, address, match.start()))):
+        elif (_WAKE_MENTION_FOLLOW.match(after) is not None
+              or _WAKE_COPULA_LEAD.search(text, 0, match.start()) is not None):
+            rejected.append("mention")
+        elif addressed:
             return "accept", match.end(), match.end(), rejected
         else:
             rejected.append("mid_sentence")
         scanned = match.end()
     return "none", len(text), scanned, rejected
+
+
+def wake_patterns(wake_word: str, wake_aliases=(), wake_anchor: bool = False,
+                  wake_explicit_aliases=()) -> tuple[re.Pattern, re.Pattern]:
+    """The (name, explicit-address) patterns for one wake identity.
+
+    The explicit pattern adds the explicit-address-only spellings; without any
+    it is the name pattern itself.
+    """
+    # A multi-word address may arrive joined or punctuated ("Name, Word", "Nameword");
+    # configured aliases cover names the recognizer spells several ways.
+    names = [wake_word.strip() or "Computer", *(alias.strip() for alias in wake_aliases if alias.strip())]
+    forms = [r"[\W_]*".join(map(re.escape, name.split())) for name in names]
+    if wake_anchor and (tail := (wake_word.strip().split() or [""])[-1]):
+        # A recognizer spells an unusual first name many ways but the last word
+        # is stable; at an utterance start, up to two short lead words then it.
+        forms.append(r"(?:[a-z]+[\W_]*){0,2}" + re.escape(tail))
+    pattern = re.compile(rf"(?<!\w)(?:{'|'.join(forms)})(?!\w)", re.IGNORECASE)
+    # Explicit-address-only tier: riskier recognizer spellings of a short
+    # name (its phonetic family) that wake the assistant only as a direct address
+    # (utterance start or "hey <name>"), never on the name-anywhere auto
+    # path, so a common word inside an ordinary utterance cannot false-wake.
+    explicit = [alias.strip() for alias in wake_explicit_aliases if alias.strip()]
+    explicit_forms = forms + [r"[\W_]*".join(map(re.escape, alias.split())) for alias in explicit]
+    return pattern, (re.compile(rf"(?<!\w)(?:{'|'.join(explicit_forms)})(?!\w)", re.IGNORECASE)
+                     if explicit else pattern)
 
 
 @dataclass
@@ -793,17 +827,23 @@ def emit(kind: str, **payload: Any) -> None:
     print(json.dumps({"type": kind, **payload}, ensure_ascii=False), flush=True)
 
 
-def load_boost_phrases(path, wake_word: str) -> list[str]:
-    """The wake word plus a bounded, de-duplicated phrase file."""
-    phrases = [wake_word, wake_word.lower()]
+def phrase_file_lines(path) -> list[str]:
+    """One phrase per line ('#' comments), whitespace-normalized; a missing file is empty."""
     try:
         lines = Path(path).read_text(encoding="utf-8").splitlines() if path else []
     except FileNotFoundError:
         lines = []
+    phrases = []
     for line in lines:
         line = " ".join(line.split())
         if line and not line.startswith("#") and len(line) <= 80:
             phrases.append(line)
+    return phrases
+
+
+def load_boost_phrases(path, wake_word: str) -> list[str]:
+    """The wake word plus a bounded, de-duplicated phrase file."""
+    phrases = [wake_word, wake_word.lower(), *phrase_file_lines(path)]
     return list(dict.fromkeys(phrases))[:ASR_PHRASES_MAX]
 
 
@@ -828,7 +868,18 @@ def phrase_decoding(source, phrases: list[str], *, alpha: float = ASR_BOOST_ALPH
                 key_phrases_list=list(phrases), use_triton=str(source.device).startswith("cuda"),
             ))
             config.greedy.boosting_tree_alpha = alpha
-    return RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
+    decoding = RNNTBPEDecoding(config, model.decoder, model.joint, source.tokenizer)
+    # NeMo's default "full_graph" mode captures the label loop as conditional
+    # nodes whose bodies run on their own streams (with_conditional_node), so
+    # the body temporaries are allocated outside the graph's memory pool, freed
+    # right after capture and unmapped by the next capture's empty_cache (every
+    # later phrase decoding, encoder graph or longer remainder). Replaying the
+    # graph then writes to unmapped memory: Xid 31 and a dead CUDA context
+    # (NVIDIA-NeMo/Speech #16325, #14727). Partial graphs capture each loop
+    # stage on one stream and keep the GPU label loop; only the loop tests
+    # synchronize with the host.
+    decoding.decoding.decoding_computer.force_cuda_graphs_mode("no_while_loops")
+    return decoding
 
 
 class StreamingASR(NemoStreamingASRService):
@@ -838,7 +889,7 @@ class StreamingASR(NemoStreamingASRService):
     dtype; the RNNT decoder and joint keep float32, so encoder output is cast
     at that boundary. ``phrase_decoding`` (shared, stateless between calls)
     replaces the legacy per-symbol greedy loop. Stream state is unchanged
-    otherwise (see discord.py).
+    otherwise.
     """
 
     phrase_decoding = None
@@ -943,7 +994,7 @@ def desktop_asr(model: str, *, device: str, dtype: str = "bfloat16",
     Restoring straight onto the GPU briefly held a second copy of the weights
     (4.7 GiB reserved on the RTX 4000 shared with Gemma), so restore on the
     CPU, cast the encoder, then move once. Encoder CUDA graphs are captured
-    here; they were formerly only a side effect of the Discord adapter.
+    here before the first capture.
     """
     service = StreamingASR(model, [70, 1], device="cpu", decoder_type="rnnt", frame_len_in_secs=0.08)
     service.asr_model.encoder.to(ASR_DTYPES[dtype])
@@ -1107,9 +1158,10 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
     def __init__(self, *, timing: SpeechInputTiming | None = None,
                  playback: PlaybackCommands | None = None,
                  mode: str = "realtime", mode_revision: int = 0,
-                 wake_word: str = "Computer", smart_turn: bool = False,
-                 semantic_turns: bool = False, event_sink=None,
-                 wake_spotter=None, **kwargs: Any) -> None:
+                 wake_word: str = "Computer", wake_aliases: tuple[str, ...] = (), wake_anchor: bool = False,
+                 smart_turn: bool = False, semantic_turns: bool = False, event_sink=None,
+                 wake_spotter=None,
+                 wake_explicit_aliases: tuple[str, ...] = (), **kwargs: Any) -> None:
         # STT audio and VAD share its system-frame FIFO, but transcription
         # frames use a separate downstream queue. Consume text inline so a
         # VAD stop cannot overtake recognized words before finalization.
@@ -1127,9 +1179,8 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
         self._transcript_timeout: asyncio.Task[None] | None = None
         self.mode = mode
         self.mode_revision = mode_revision
-        self._wake_pattern = re.compile(
-            rf"(?<!\w){re.escape(wake_word.strip() or 'Computer')}(?!\w)", re.IGNORECASE,
-        )
+        self._wake_pattern, self._wake_explicit_pattern = wake_patterns(
+            wake_word, wake_aliases, wake_anchor, wake_explicit_aliases)
         self._wake_prefix = ""
         self._wake_address: int | None = 0
         self._wake_scanned = 0
@@ -1198,16 +1249,16 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             self._wake_address = None
 
     def _classify_wake(self, *, final: bool = False) -> str | None:
-        """Return command text after an accepted address, else None."""
+        """Return command text after an accepted address or auto trigger, else None."""
         decision, end, self._wake_scanned, rejected = classify_wake(
             self._wake_prefix, self._wake_address, self._wake_scanned,
-            self._wake_pattern, final=final,
+            self._wake_explicit_pattern, final=final,
         )
         for reason in rejected:
             # Counts only: rejected speech never leaves the worker.
             self._emit("wake_rejected", reason=reason, mode_revision=self.mode_revision)
         self._wake_pending = decision == "pending"
-        return self._wake_prefix[end:] if decision == "accept" else None
+        return self._wake_prefix[end:] if decision in ("accept", "auto") else None
 
     async def _confirm_wake(self) -> None:
         try:
@@ -1217,7 +1268,13 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
                     and not self._mode_waiting_for_stop):
                 text = self._classify_wake(final=True)
                 if text is not None:
-                    await self._open_wake(text)
+                    opened = await self._open_wake(text)
+                    if opened.strip():
+                        # Feed the recognized address into the ordinary buffer;
+                        # the VAD endpoint still owns final admission.
+                        await self._handle_transcription(
+                            InterimTranscriptionFrame(text=opened, user_id="", timestamp=""),
+                            FrameDirection.DOWNSTREAM)
         finally:
             if self._wake_confirm is asyncio.current_task():
                 self._wake_confirm = None
@@ -1596,11 +1653,14 @@ class ObsidienceNeMoTurnTakingService(NeMoTurnTakingService):
             )
             return
         if isinstance(frame, VADUserStoppedSpeakingFrame):
-            if self.mode == "wake" and not self._wake_open and self._wake_pending:
-                # Silence after a trailing name confirms it as an address.
+            if (self.mode == "wake" and not self._wake_open
+                    and self._wake_pending):
+                # Silence after a trailing name confirms the explicit address.
                 command = self._classify_wake(final=True)
                 if command is not None:
-                    await self._open_wake(command)
+                    opened = await self._open_wake(command)
+                    if opened.strip():
+                        await self._handle_completed_text(opened, direction)
             if self._wake_spotted and not self._wake_open:
                 # ASR never accepted the spotted name; the empty stop below
                 # ends the provisional speech edge.
@@ -1698,6 +1758,7 @@ class PocketTTSService(TTSService):
         # The previous chunk's reply identity and whether it ended a sentence.
         self._previous_chunk: tuple | None = None
         config = root / "english.yaml"
+        self._voices_root = root / "voices"
         voice_path = root / "voices" / f"{voice}.safetensors"
         if not config.is_file() or not voice_path.is_file():
             raise FileNotFoundError("Pocket TTS config or selected voice is missing")
@@ -1716,76 +1777,6 @@ class PocketTTSService(TTSService):
         self._model.to("cpu")
         self._voice_state = self._model.get_state_for_audio_prompt(str(voice_path))
         self._synthesis_lock = threading.Lock()
-
-    async def external_pcm(self, text: str) -> AsyncGenerator[bytes, None]:
-        """Serialize an external reply on the existing Pocket model.
-
-        This consumer owns only its PCM iterator, never desktop playback state.
-        The bounded queue and cooperative cancellation retain Pocket's required
-        producer cleanup before releasing its existing synthesis lock.
-        """
-        clean = " ".join(text.split())[:4_000]
-        if not clean:
-            return
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue(maxsize=8)
-        cancelled = threading.Event()
-
-        def put(item) -> bool:
-            future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
-            while not cancelled.is_set():
-                try:
-                    future.result(timeout=0.1)
-                    return True
-                except TimeoutError:
-                    continue
-            future.cancel()
-            return False
-
-        def synthesize() -> None:
-            try:
-                while not self._synthesis_lock.acquire(timeout=0.1):
-                    if cancelled.is_set():
-                        return
-                try:
-                    if cancelled.is_set():
-                        return
-                    # Pocket's own stop event ends the latent producer at its next frame;
-                    # the generator still joins its decoder before the lock is released.
-                    for chunk in self._model.generate_audio_stream(self._voice_state, clean, stop=cancelled):
-                        if not cancelled.is_set():
-                            samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                            # Discord has its own playback volume. Preserve Pocket's
-                            # dynamics instead of applying the desk speaker's +9 dB.
-                            put(_speech_pcm(samples, gain=1.0))
-                finally:
-                    self._synthesis_lock.release()
-            except BaseException:
-                if not cancelled.is_set():
-                    put(RuntimeError("Pocket TTS speech delivery failed"))
-            finally:
-                if not cancelled.is_set():
-                    put(None)
-
-        worker = threading.Thread(target=synthesize, name="pocket-discord", daemon=False)
-        worker.start()
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    return
-                if isinstance(item, BaseException):
-                    raise item
-                yield item
-        finally:
-            cancelled.set()
-            # Never detach a generator that still owns Pocket's native work.
-            join = asyncio.create_task(asyncio.to_thread(worker.join))
-            while not join.done():
-                try:
-                    await asyncio.shield(join)
-                except asyncio.CancelledError:
-                    continue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         if isinstance(frame, TTSSpeakFrame):
@@ -2286,6 +2277,8 @@ class ObsidienceTaskBridge(FrameProcessor):
 async def command_loop(
     task: PipelineTask,
     playback: PlaybackCommands | None = None,
+    *,
+    tts: "PocketTTSService | None" = None,
 ) -> None:
     playback = playback or PlaybackCommands()
     try:
@@ -2330,7 +2323,7 @@ async def command_loop(
                 await playback.close()
                 await task.queue_frame(EndFrame())
                 return
-            elif kind == "mode" and command.get("mode") in {"wake", "realtime"}:
+            if kind == "mode" and command.get("mode") in {"wake", "realtime"}:
                 revision = command.get("mode_revision")
                 if type(revision) is int and revision >= 0:
                     playback.cancel_cues()
@@ -2369,61 +2362,7 @@ def create_stt(args: argparse.Namespace):
     )
 
 
-async def run_discord_only(args: argparse.Namespace) -> None:
-    """Own shared models and Discord while desktop capture/playback is muted."""
-    if not args.discord_socket:
-        raise ValueError("Desktop-disabled speech requires the configured Discord socket")
-    # No PyAudio probe, local transport, desktop pipeline, cue or microphone.
-    stt = create_stt(args)
-    tts = PocketTTSService(root=Path(args.pocket_root), voice=args.voice)
-    sys.modules.setdefault(f"{__package__}.worker", sys.modules[__name__])
-    from .discord import DiscordSpeechServer
-    server = DiscordSpeechServer(Path(args.discord_socket), stt, tts)
-    stopping = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    import signal
-    for signum in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(signum, stopping.set)
-    reader = asyncio.StreamReader(limit=65_536)
-    protocol = asyncio.StreamReaderProtocol(reader)
-    pipe = None
-
-    async def commands():
-        while True:
-            line = await reader.readline()
-            if not line:
-                stopping.set()
-                return
-            message = json.loads(line)
-            if isinstance(message, dict) and message.get("type") == "stop":
-                stopping.set()
-                return
-            # Desktop speak/cue/mode/control messages cannot enable an input
-            # or output route on this worker. Mode transitions replace it.
-
-    command_task = None
-    try:
-        await server.start()
-        pipe, _ = await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
-        command_task = asyncio.create_task(commands(), name="discord-shared-control")
-        command_task.add_done_callback(lambda _task: stopping.set())
-        emit("discord_ready", desktop_disabled=True, encoder_cuda_graphs=server.encoder_cuda_graphs)
-        await stopping.wait()
-    finally:
-        if command_task is not None:
-            command_task.cancel()
-            await asyncio.gather(command_task, return_exceptions=True)
-        if pipe is not None:
-            pipe.close()
-        await server.close()
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            loop.remove_signal_handler(signum)
-
-
 async def run(args: argparse.Namespace) -> None:
-    if args.desktop_disabled:
-        await run_discord_only(args)
-        return
     probe = pyaudio.PyAudio()
     try:
         pulse_devices = [
@@ -2502,6 +2441,7 @@ async def run(args: argparse.Namespace) -> None:
     playback._turn_taking = turn_taking
     bridge = ObsidienceTaskBridge(playback)
     tts = PocketTTSService(root=Path(args.pocket_root), voice=args.voice, playback=playback)
+
     playback._output = transport.output()
     pipeline = Pipeline(
         [
@@ -2560,24 +2500,13 @@ async def run(args: argparse.Namespace) -> None:
         )
         await playback.startup(task, args.startup_confirmation)
 
-    discord = None
-    if args.discord_socket:
-        # The worker is normally launched with -m. Let the optional adapter
-        # reuse these exact service classes rather than import a second copy.
-        sys.modules.setdefault(f"{__package__}.worker", sys.modules[__name__])
-        from .discord import DiscordSpeechServer
-        discord = DiscordSpeechServer(Path(args.discord_socket), stt, tts)
-        await discord.start()
-        emit("discord_ready", desktop_disabled=False, encoder_cuda_graphs=discord.encoder_cuda_graphs)
 
     commands = asyncio.create_task(
-        command_loop(task, playback), name="speech-commands",
+        command_loop(task, playback, tts=tts), name="speech-commands",
     )
     try:
         await PipelineRunner(handle_sigint=True, handle_sigterm=True).run(task)
     finally:
-        if discord is not None:
-            await discord.close()
         commands.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await commands
@@ -2593,12 +2522,25 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--wake-word", default="Computer")
     result.add_argument("--mode", choices=("wake", "realtime"), default="realtime")
     result.add_argument("--mode-revision", type=int, default=0)
-    result.add_argument("--discord-socket", default="", help="Optional owner-only Discord PCM socket")
-    result.add_argument("--desktop-disabled", action="store_true", help="Share speech models without desktop audio")
     return result
 
 
+def _pin_cpus() -> None:
+    """Keep speech on OBSIDIENCE_SPEECH_CPUS when set, apart from background work."""
+    spec = os.environ.get("OBSIDIENCE_SPEECH_CPUS", "").strip()
+    if not spec:
+        return
+    cpus: set[int] = set()
+    for part in spec.split(","):
+        low, _, high = part.strip().partition("-")
+        cpus.update(range(int(low), int(high or low) + 1))
+    allowed = os.sched_getaffinity(0)
+    if cpus & allowed:
+        os.sched_setaffinity(0, cpus & allowed)
+
+
 def main() -> None:
+    _pin_cpus()
     from loguru import logger
 
     # NeMo/Pipecat DEBUG lines carry recognized words. Stderr is the Harness's

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from functools import lru_cache
 import re
-import unicodedata
 
 from hassil import Intents, recognize_all
 
@@ -94,176 +93,11 @@ def _media_command(text):
     return {'name': 'media.pause', 'args': {'query': choices.pop()}}
 
 
-@lru_cache(maxsize=1)
-def _discord_media_intents():
-    target = '[it|that|[the] (music|audio|playback|song)]'
-    return Intents.from_dict({
-        'language': 'en',
-        'intents': {
-            **{name: {'data': [{'sentences': [f'[please] ({verbs}) {target} [please]']}]}
-               for name, verbs in (('DiscordPause', 'pause'), ('DiscordResume', 'resume|unpause'),
-                                   ('DiscordStop', 'stop|stop playing'))},
-            'DiscordContinue': {'data': [{'sentences': [
-                '[please] (keep|continue) playing [[the] music] [please]',
-            ]}]},
-        },
-    })
-
-
-def recognize_discord_command(objective, allowed):
-    """One complete literal control; the caller must bind the Discord principal."""
-    if (not isinstance(objective, str) or len(objective) > 100
-            or not {'discord.control', 'task.complete'}.issubset(allowed)):
-        return None
-    text = ' '.join(objective.casefold().split()).rstrip('.!')
-    if not re.fullmatch(r'[a-z ]+', text):
-        return None
-    if text in {'no', 'nope', 'no thanks', 'no thank you'}:
-        return {'name': 'task.complete', 'args': {'status': 'completed', 'summary': 'Okay.'},
-                'declined_music': True}
-    actions = {'DiscordPause': 'pause', 'DiscordResume': 'resume', 'DiscordStop': 'stop',
-               'DiscordContinue': 'continue'}
-    choices = {actions[result.intent.name] for result in recognize_all(text, _discord_media_intents())}
-    if len(choices) != 1:
-        return None
-    action = choices.pop()
-    return ({'operation': 'discord_continue'} if action == 'continue' else
-            {'name': 'discord.control', 'args': {'action': action}})
-
-
-@lru_cache(maxsize=1)
-def _discord_music_intents():
-    return Intents.from_dict({
-        'language': 'en',
-        'lists': {'music_title': {'wildcard': True}, 'music_artist': {'wildcard': True}},
-        'intents': {'DiscordMusic': {'data': [{'sentences': [
-            '[please] play {music_title} by {music_artist} [please]',
-        ]}]}},
-    })
-
-
-def recognize_discord_music(objective, allowed, *, voice=False):
-    """Explicit music slots; selection still requires fresh exact metadata."""
-    if (not isinstance(objective, str) or len(objective) > 240
-            or not {'media.library', 'discord.control', 'task.complete'}.issubset(allowed)):
-        return None
-    text = ' '.join(objective.split()).rstrip('.!')
-    # Observed spoken "play" -> "plate" error. Only an addressed voice
-    # activation may use this correction, and only exact fresh music identity
-    # can authorize its playback. Keep the actual transcript unchanged.
-    corrected = voice and re.match(r'^(?:please )?plate ', text, re.I) is not None
-    if corrected:
-        text = re.sub(r'^(please )?plate ', lambda match: (match[1] or '') + 'play ', text, flags=re.I)
-    choices = {(str(result.entities['music_title'].value).strip(),
-                str(result.entities['music_artist'].value).strip())
-               for result in recognize_all(text, _discord_music_intents())}
-    if not choices:
-        plain = re.fullmatch(r'(?:please )?play (?:some )?(.+?)(?: please)?', text, re.I)
-        if plain and 0 < len(query := plain[1].strip()) <= 115:
-            # ASR spells this artist's spoken name as the ordinary homophone.
-            # This exact voice-only alias still requires fresh verified artist
-            # metadata; it never changes a title or admits general fuzzy matches.
-            if voice and query.casefold() == 'the weekend':
-                query = 'The Weeknd'
-            return {'query': query, **({'requires_exact': True} if corrected else {})}
-        return None
-    if len(choices) != 1:
-        return None
-    title, artist = choices.pop()
-    if not title or not artist or len(title + artist) > 115:
-        return None
-    if voice and artist.casefold() == 'the weekend':
-        artist = 'The Weeknd'
-    return {'title': title, 'artist': artist, **({'requires_exact': True} if corrected else {})}
-
-
-def _music_identity(value):
-    return ' '.join(re.findall(r'[^\W_]+', unicodedata.normalize('NFKC', value).casefold()))
-
-
 _MUSIC_GENRES = frozenset({
     'synthwave', 'synth wave', 'retrowave', 'vaporwave', 'lofi', 'lo fi',
     'jazz', 'ambient', 'classical', 'techno', 'trance', 'house', 'disco',
     'hip hop', 'hiphop', 'rock', 'pop', 'country', 'reggae', 'drum and bass',
 })
-
-
-def exact_discord_music(request, candidates):
-    """Select one exact official recording at the best presentation rank.
-
-    Only a leading verified channel artist, credited collaborators and finite
-    presentation decorations are removed. Live/remix/remaster/cover/version
-    words remain part of identity.
-    """
-    query_only = 'query' in request
-    wanted_artist = _music_identity(request['query'] if query_only else request['artist'])
-    wanted_title = _music_identity(request['query'] if query_only else request['title'])
-    genre = re.sub(r' music$', '', wanted_title)
-    if query_only and not request.get('requires_exact') and genre in _MUSIC_GENRES:
-        # A literal genre asks for a relevant recording, not one exact artist.
-        # Use fresh search order only when the title explicitly names that genre.
-        aliases = {genre}
-        if genre in {'synthwave', 'synth wave', 'lofi', 'lo fi', 'hiphop', 'hip hop'}:
-            aliases |= {word for word in _MUSIC_GENRES if word.replace(' ', '') == genre.replace(' ', '')}
-        for row in candidates:
-            if (isinstance(row, dict) and row.get('provider') == 'youtube'
-                    and isinstance(row.get('title'), str) and isinstance(row.get('artist'), str)
-                    and isinstance(row.get('id'), str)
-                    and type(row.get('duration_seconds')) in {int, float}
-                    and 45 <= row['duration_seconds'] <= 86400
-                    and any(f' {word} ' in f' {_music_identity(row["title"])} ' for word in aliases)):
-                return row
-    valid = []
-    for row in candidates:
-        if (not isinstance(row, dict) or row.get('provider') != 'youtube'
-                or row.get('verified_channel') is not True
-                or not isinstance(row.get('artist'), str) or not isinstance(row.get('title'), str)
-                or not isinstance(row.get('id'), str)
-                or not query_only and _music_identity(row['artist']) != wanted_artist):
-            continue
-        valid.append(row)
-    if query_only and not request.get('requires_exact'):
-        # Any recording by this exact verified artist satisfies an artist-only
-        # request. Preserve the provider's relevance order; never infer aliases.
-        artists = [row for row in valid if _music_identity(row['artist']) == wanted_artist]
-        if artists:
-            return artists[0]
-    matches = []
-    for row in valid:
-        title, rank, label = row['title'], 1, ''
-        decoration = re.fullmatch(r'(.+?)\s*[\(\[](official audio|official music video|official video|(?:official )?lyric video)[\)\]]',
-                                  title, re.I)
-        if decoration:
-            title = decoration[1]
-            label = decoration[2].casefold()
-            rank = 0 if label == 'official audio' else 2 if 'lyric' in label else 3
-        artist = _music_identity(row['artist'])
-        credits = re.fullmatch(r'(.+?)\s+[-–—]\s+(.+)', title)
-        artist_credited = False
-        if credits:
-            # Official artist uploads often credit collaborators before the
-            # title, e.g. "Artist, Guest - Song". An unrelated verified lyric
-            # channel must not gain the performer's identity from that text.
-            credited = re.split(r'\s*(?:,|&|\b(?:and|with|feat\.?|ft\.?)\b)\s*', credits[1], maxsplit=1, flags=re.I)[0]
-            if _music_identity(credited) == artist:
-                title = credits[2]
-                artist_credited = True
-        if 'lyric' in label and query_only and not artist_credited:
-            continue
-        identity = _music_identity(title)
-        if identity.startswith(artist + ' '):
-            identity = identity[len(artist) + 1:]
-        if identity == wanted_title:
-            matches.append((rank, row))
-    if not matches:
-        return None
-    # A title without an artist must resolve to one artist/recording identity
-    # before presentation ranking; two artists with the same song need judgment.
-    if query_only and len({_music_identity(row['artist']) for _, row in matches}) != 1:
-        return None
-    rank = min(value for value, _ in matches)
-    best = {row['id']: row for value, row in matches if value == rank}
-    return next(iter(best.values())) if len(best) == 1 else None
 
 
 # Each literal TV media phrase maps to one target state the TV reads back.

@@ -876,8 +876,6 @@ def settle_maintenance_occurrence(note: Note) -> dict | None:
         return None
 
 
-
-
 def _resolved_input_evidence(note: Note, params: dict) -> dict | None:
     """Attest obsolete input through its owner; never infer it from a summary."""
     if note.ref == "Tasks/audit" and params.get("optimization_case"):
@@ -1082,11 +1080,12 @@ def _autonomous_occurrence(note: Note) -> bool:
 
 def _trusted_research_handler(task_ref: str, run_id: str) -> bool:
     """Validate the existing owner of supporting evidence before omitting Learn."""
-    if task_ref == "Agents/Executive/Executive" and run_id:
+    if task_ref.startswith("Agents/") and run_id:
+        # An Agent's own conversation run (Executive chat) owns pages it fetched.
         from ..knowledge.vault import resolver
 
         agent = resolver().resolve(task_ref)
-        if not agent or agent.kind != "agent" or agent.meta.get("role") != "executive":
+        if not agent or agent.kind != "agent" or agent.ref != task_ref:
             return False
         receipts = INDEX.tool_run_receipts(run_id)
         if not receipts or receipts.get("task_ref") != task_ref:
@@ -1588,7 +1587,7 @@ async def _refresh_source_health() -> None:
 def reconcile_task_health(notes: list[Note]) -> dict | None:
     """Continue actionable recovery; unresolved faults go to the Review owner."""
     from .repair import REPAIR_TASK, definition_revision, health_causes, repair_plan, settle_superseded_repair
-    from ..knowledge.review import sync_health_notifications
+    from ..knowledge.review import sync_health_notifications, sync_source_change_notifications
 
     tasks = [note for note in notes if note.kind == "task"]
     # A configuration block is not an unresolved execution. Revalidate its
@@ -1663,6 +1662,7 @@ def reconcile_task_health(notes: list[Note]) -> dict | None:
                                  for cause in ready)
     from .optimization.incidents import notifications as optimization_notifications
     sync_health_notifications([*notifications, *optimization_notifications()])
+    sync_source_change_notifications(notes)
     return result
 
 
@@ -1979,10 +1979,6 @@ def memory_curation_paused(note: Note) -> bool:
     return bool(MEMORY.curation_paused and isinstance(params, dict) and (
         params.get("event") == MEMORY_EVENT
         or note.ref == "Tasks/link" and params.get("observation_source")))
-
-
-
-
 
 
 def due_tasks(notes: list[Note] | None = None) -> list:
