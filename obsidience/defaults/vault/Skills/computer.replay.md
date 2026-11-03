@@ -8,7 +8,7 @@ obsidience:
 
 ## Runtime
 
-Use computer.replay when the owner asks about the recent past on screen: what just happened, what was that, what did I miss, where did something go, why did it close. Pass the owner's question as query. Set seconds only when they name a span ("the last minute" is 60) and surface only when they name a screen. Describe what changed in order, from the labelled frames, and say plainly when a screen showed no visible change. For what is on screen now, use computer.observe instead.
+Use computer.replay when the owner asks about the recent past on screen: what just happened, what was that, what did I miss, where did something go, why did it close. Pass the owner's question as query. Set seconds only when they name a span ("the last minute" is 60) and surface only when they name a screen. Follow the returned stage instruction. The endpoint alone cannot establish earlier events; use the overview and chronological frames for those. Add or correct useful findings without repeating prior narration; SKIP is silent in progressive voice turns. Say when sampling detected no change, without claiming nothing happened between frames. For what is on screen now, use computer.observe instead.
 
 ## Reference
 

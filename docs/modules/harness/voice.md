@@ -134,6 +134,11 @@ pass the completion's own unsupported-claim check first. A later Tool call or a
 rejected completion stops that audio and retracts the early speech; acceptance
 speaks only the unspoken remainder.
 
+For visual history, [progressive perception](progressive-perception.md) can prepare
+later evidence while the first answer generates and let later inference overlap
+queued speech. New images enter between model steps; they do not mutate an
+in-flight request.
+
 ## Barge-in
 
 In Realtime mode, speech onset over a reply **ducks** it by 15 dB at once and

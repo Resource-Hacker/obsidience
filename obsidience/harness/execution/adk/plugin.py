@@ -31,7 +31,7 @@ from google.adk.models.llm_response import LlmResponse
 from google.adk.plugins.base_plugin import BasePlugin
 from google.genai import types
 
-from .. import native
+from .. import native, progressive
 from .. import trace as action_trace
 from ..capability_core import (
     OBSERVATION_CONTEXT_FIELD, CapabilityExecution, foreground_checkpoint, observation_text, run_capability,
@@ -172,6 +172,11 @@ class AgentPlugin(BasePlugin):
         self._acknowledgement: asyncio.Task | None = None
         # A sanitized replacement response, when a native step is rejected.
         self._replacement: LlmResponse | None = None
+        self._evidence: progressive.EvidenceSequence | None = None
+        self._evidence_deadline = 0.0
+        self._evidence_call: tuple | None = None
+        self._evidence_dispatch: progressive.EvidenceSequence | None = None
+        self._progressive_text: progressive.ProgressiveText | None = None
 
     # Model reservation -------------------------------------------------
     async def adopt_lease(self):
@@ -242,7 +247,17 @@ class AgentPlugin(BasePlugin):
     # Tool policy -------------------------------------------------------
     async def before_tool_callback(self, *, tool, tool_args, tool_context):
         before = len(self.trace)
+        call, self._evidence_call = self._evidence_call, None
+        if call is not None and getattr(tool_context, 'function_call_id', None) == call[0]:
+            if (not self._evidence_current() or tool.name != call[1] or tool_args != call[2]):
+                await self._close_evidence(clear_text=False)
+                return _text('The frozen replay continuation expired; no new capture was made.')
+            self._evidence_dispatch = self._evidence
+        else:
+            await self._close_evidence()
         response = self.admit(tool.name, tool_args)
+        if response is not None:
+            await self._close_evidence()
         if (response is not None and len(self.trace) == before + 1
                 and self.trace[-1].get('invalid_tool') == tool.name):
             self._offer_refusal(tool.name, tool_args, self.trace[-1]['obs'])
@@ -358,15 +373,35 @@ class AgentPlugin(BasePlugin):
             queries = ([args.get('query')] if 'query' in args else args.get('queries', [])) if name == 'vault.search' else []
             previous = {query: self.ctx.get('_vault_searches', {}).get(query) for query in queries}
             blocked = self._repeat_blocked(name, args) if self.task_mode and name != 'task.complete' else None
-            acknowledgement = self._acknowledge_later(name)
+            continuation, self._evidence_dispatch = self._evidence_dispatch, None
+            if continuation is not None:
+                if (not self._evidence_current() or name != continuation.tool
+                        or args != continuation.arguments):
+                    await self._close_evidence(clear_text=False)
+                    return _text('The frozen replay continuation is unavailable; no new capture was made.')
+            else:
+                await self._close_evidence()
+            enabled = (name == 'computer.replay' and not self.task_mode and self.voice is not None
+                       and CONFIG.extras.get('realtime_progressive_evidence', True) is not False)
+            if enabled:
+                self.ctx[progressive.ENABLED_FIELD] = True
+            if continuation is not None:
+                self.ctx[progressive.CONTINUE_FIELD] = continuation
+            acknowledgement = None if continuation is not None else self._acknowledge_later(name)
             try:
                 outcome = await run_capability(
                     self.ex, name, args, execute=executor.execute_capability,
                     execute_async=executor.execute_capability_async, scope_checkpoint=executor._scope_checkpoint,
                     blocked=blocked)
+            except BaseException:
+                await self._close_evidence()
+                raise
             finally:
+                self.ctx.pop(progressive.ENABLED_FIELD, None)
+                self.ctx.pop(progressive.CONTINUE_FIELD, None)
                 if acknowledgement is not None:
                     acknowledgement.cancel()  # Words already on their way are not cut.
+            await self._adopt_evidence(name, args, outcome, enabled)
             self._last_call = (name, args, outcome)
             if queries:
                 current = self.ctx.get('_vault_searches', {})
@@ -415,8 +450,85 @@ class AgentPlugin(BasePlugin):
         self._acknowledgement = asyncio.create_task(acknowledge(), name='obsidience-tool-acknowledgement')
         return self._acknowledgement
 
-    # Staged stream replay (owner, 2026-10-27) --------------------------
+    # Private progressive evidence over the original frozen observation ------
+    def _evidence_current(self) -> bool:
+        cancelled = self.ctx.get('_capability_cancel_event')
+        return (self._evidence is not None
+                and self.ctx.get(progressive.PENDING_FIELD) is self._evidence
+                and time.monotonic() < self._evidence_deadline
+                and not self.steering_pending and not self.ex.done
+                and not (self.interruption_event is not None and self.interruption_event.is_set())
+                and not (cancelled is not None and cancelled.is_set()))
 
+    async def _close_evidence(self, *, clear_text: bool = True) -> None:
+        sequence, self._evidence = self._evidence, None
+        pending = self.ctx.pop(progressive.PENDING_FIELD, None)
+        self.ctx.pop(progressive.CONTINUE_FIELD, None)
+        self.ctx.pop(progressive.ENABLED_FIELD, None)
+        self._evidence_call = self._evidence_dispatch = None
+        if clear_text:
+            self._progressive_text = None
+            if self.voice is not None:
+                self.voice.progressive = None
+        await progressive.close_sequences(sequence, pending)
+
+    async def _adopt_evidence(self, name: str, args: dict, outcome, enabled: bool) -> None:
+        sequence = self.ctx.get(progressive.PENDING_FIELD)
+        if sequence is None:
+            if self._evidence is not None:
+                await self._close_evidence(clear_text=False)
+            return
+        try:
+            receipt = json.loads(outcome.observation)
+            status = receipt.get('observation', receipt).get('status')
+        except (AttributeError, TypeError, ValueError):
+            status = None
+        if (not enabled or outcome.kind != 'returned' or status != 'observed'
+                or not isinstance(sequence, progressive.EvidenceSequence)
+                or sequence.tool != name or sequence.arguments != args):
+            await self._close_evidence(clear_text=False)
+            return
+        if sequence is not self._evidence:
+            previous, self._evidence = self._evidence, sequence
+            await progressive.close_sequences(previous)
+            self._evidence_deadline = time.monotonic() + progressive.MAX_AGE_SECONDS
+            self._progressive_text = progressive.ProgressiveText()
+
+    def _progressive_response(self, response: LlmResponse) -> LlmResponse | None:
+        call = self._evidence_call
+        if call is None:
+            return None
+        identifier, name, args = call
+        parts = [part for part in (response.content.parts if response.content and response.content.parts else [])
+                 if not part.thought]
+        parts.append(types.Part(function_call=types.FunctionCall(id=identifier, name=name, args=deepcopy(args))))
+        return response.model_copy(update={'content': types.Content(role='model', parts=parts)})
+
+    async def _progressive_step(self, response: LlmResponse, text: str) -> tuple[str, bool]:
+        ledger = self._progressive_text
+        if ledger is None:
+            return text, False
+        try:
+            stage = ledger.finish_stage(text)
+        except ValueError:
+            await self._close_evidence()
+            if self.voice is not None:
+                await self.voice.retract(halt=True)
+            raise
+        # The event history matches the filtered stage already offered to speech.
+        self._replacement = response.model_copy(update={
+            'content': types.Content(role='model', parts=[types.Part(text=stage)]) if stage else None})
+        current = self._evidence_current()
+        room = self.model_steps < self.max_steps and self.ex.step + 1 < self.max_steps
+        if current and self._evidence.has_next and room:
+            self._evidence_call = (str(uuid.uuid4()), self._evidence.tool, deepcopy(self._evidence.arguments))
+            self.feedback = None
+            self.emit('event', 'computer.replay: continuing the same frozen evidence snapshot',
+                      fields={'payload': {'kind': 'evidence_stage', 'name': self._evidence.tool}})
+            return text, True
+        summary = ledger.summary
+        await self._close_evidence(clear_text=False)
+        return summary, False
 
     async def _simulate(self, name: str, args: dict) -> dict:
         """An evaluation trial's answer to one admitted call; the model still chose it."""
@@ -522,12 +634,21 @@ class AgentPlugin(BasePlugin):
         return self.ex.done or self.steering_pending
 
     async def before_model_callback(self, *, callback_context, llm_request):
+        if self.steering_pending:
+            await self._close_evidence()
+        elif self._evidence is not None and not self._evidence_current():
+            await self._close_evidence(clear_text=False)
         if self.boundary():
             # No content and no error: ADK ends this invocation without an
             # event. The controller then settles or applies the clarification.
+            await self._close_evidence()
             return LlmResponse()
         self.model_steps += 1
         self.rotate()
+        if self._progressive_text is not None:
+            self._progressive_text.begin_stage()
+        if self.voice is not None:
+            self.voice.progressive = self._progressive_text
         if self.prepared_speech is not None:
             prepared, self.prepared_speech = self.prepared_speech, None
             if self.voice is not None:
@@ -681,9 +802,11 @@ class AgentPlugin(BasePlugin):
             llm_response = llm_response.model_copy(update={
                 'content': types.Content(role='model', parts=kept) if kept else None})
             await self._finish_step(llm_response)
-            return self._take_replacement() or llm_response
+            replacement = self._take_replacement() or llm_response
+            return self._progressive_response(replacement) or replacement
         await self._finish_step(llm_response)
-        return self._take_replacement()
+        replacement = self._take_replacement()
+        return self._progressive_response(replacement or llm_response) or replacement
 
     def _take_replacement(self) -> LlmResponse | None:
         replacement, self._replacement = self._replacement, None
@@ -728,6 +851,10 @@ class AgentPlugin(BasePlugin):
             self._replacement = LlmResponse()
             if self.voice is not None:
                 await self.voice.retract(halt=True)
+        if self._progressive_text is not None and (calls or reason != 'stop' or imitation):
+            await self._close_evidence()
+            if self.voice is not None and reason != 'tool-calls':
+                await self.voice.retract(halt=True)
         if self.voice is not None:
             if calls:
                 await self.voice.feed({'type': 'block-start', 'blockType': 'tool-call'})
@@ -754,6 +881,16 @@ class AgentPlugin(BasePlugin):
             # A reply cut off at the output limit is a truncated call, not a missing one.
             self.feedback = OUTPUT_LIMIT_FEEDBACK if reason == 'max-tokens' else NO_TOOL_CALL_FEEDBACK
             return
+        if not calls and reason == 'stop' and not imitation and self._progressive_text is not None:
+            text, continuing = await self._progressive_step(response, text)
+            if continuing:
+                return
+            if not text:
+                result = await self.operate('task.complete', {'status': 'failed',
+                    'summary': "I couldn't establish an answer from the replay images."})
+                self.feedback = (None if self.ex.done else '\n'.join(
+                    block['text'] for block in result if block['type'] == 'text'))
+                return
         self.feedback = await settle_model_step(self, self.operate, text, bool(calls), reason,
                                                 allowed=self.advertised, ctx=self.ctx, trace=self.trace,
                                                 emit=self.emit, voice=self.voice)
@@ -763,24 +900,27 @@ class AgentPlugin(BasePlugin):
         """Release what this activation acquired: an unadopted reservation and its lease."""
         self.generating.clear()
         self.images.clear()
-        acknowledgement, self._acknowledgement = self._acknowledgement, None
-        if acknowledgement is not None and not acknowledgement.done():
-            acknowledgement.cancel()
-            await asyncio.wait([acknowledgement])
-        if self.lease_prefetch is not None:
-            # An unadopted reservation never outlives its activation.
-            self.lease_prefetch.cancel()
-            await asyncio.wait([self.lease_prefetch])
-            if not self.lease_prefetch.cancelled() and self.lease_prefetch.exception() is None:
-                await self.lease_prefetch.result()[1].__aexit__(None, None, None)
-            self.lease_prefetch = None
-        # End the activation: drop its context and witnesses, then release the model.
-        for key in ("_foreground_interruption_event", OBSERVATION_CONTEXT_FIELD, "_computer_response_observation"):
-            self.ctx.pop(key, None)
-        self.ex.latest_action_evidence = None
-        self.discard_witnesses()
-        lease, self.ex.active_lease = self.ex.active_lease, None
-        if lease is not None:
-            started = time.monotonic()
-            await lease.__aexit__(None, None, None)
-            action_trace.latency("model_release", duration_ms=(time.monotonic() - started) * 1000)
+        try:
+            await self._close_evidence()
+        finally:
+            acknowledgement, self._acknowledgement = self._acknowledgement, None
+            if acknowledgement is not None and not acknowledgement.done():
+                acknowledgement.cancel()
+                await asyncio.wait([acknowledgement])
+            if self.lease_prefetch is not None:
+                # An unadopted reservation never outlives its activation.
+                self.lease_prefetch.cancel()
+                await asyncio.wait([self.lease_prefetch])
+                if not self.lease_prefetch.cancelled() and self.lease_prefetch.exception() is None:
+                    await self.lease_prefetch.result()[1].__aexit__(None, None, None)
+                self.lease_prefetch = None
+            # End the activation: drop its context and witnesses, then release the model.
+            for key in ("_foreground_interruption_event", OBSERVATION_CONTEXT_FIELD, "_computer_response_observation"):
+                self.ctx.pop(key, None)
+            self.ex.latest_action_evidence = None
+            self.discard_witnesses()
+            lease, self.ex.active_lease = self.ex.active_lease, None
+            if lease is not None:
+                started = time.monotonic()
+                await lease.__aexit__(None, None, None)
+                action_trace.latency("model_release", duration_ms=(time.monotonic() - started) * 1000)

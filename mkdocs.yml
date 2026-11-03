@@ -119,6 +119,7 @@ nav:
       - Harness:
           - modules/harness/index.md
           - Realtime voice: modules/harness/voice.md
+          - Progressive perception: modules/harness/progressive-perception.md
           - Self-improvement:
               - modules/harness/self-improvement.md
               - Harness2 integration notes: harness2.md

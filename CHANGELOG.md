@@ -17,6 +17,14 @@ by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/
   excluded source paths. Preserve connected tour targets, link folders to GitHub
   directories, and expose a back control when inspecting a file.
 
+### Added
+
+- **Harness.** Progressive voice replay: an endpoint snapshot arrives before
+  background history preparation, followed by a temporal overview and selected
+  detailed frames from the same frozen window. Shared continuation ownership,
+  exact sentence filtering, cancellation and cleanup stay in the existing Agent
+  loop. Document native video and zero-copy alternatives with explicit limits.
+
 ### Changed
 
 - **Harness.** Lease independent model slots for Executive conversation and

@@ -74,6 +74,7 @@ the Harness (speech worker) to apply them.
 | `realtime_asr_early_final` | `false` | At the first 200 ms pause, decode the tail once more and send the words as a pause edge for speculative admission. |
 | `realtime_semantic_turns` | `false` | Contextual speech admission: the Executive judges whether an utterance is complete in the same request that drafts its first response, speculated at pauses. |
 | `realtime_early_speech` | `true` | Speak claim-checked sentences of a voice turn before completion acceptance. `false` speaks only the accepted reply. |
+| `realtime_progressive_evidence` | `true` | Voice `computer.replay` returns an endpoint first while history is prepared, then a temporal overview and optional detail. Requires early speech; `false` uses one completed result. |
 | `realtime_barge_in_ducking` | `true` | Speech over a reply ducks it, holds it once you keep talking and resumes it after a false alarm. `false` stops playback on speech onset. |
 | `realtime_tts_quantize` | `false` | Pocket TTS uses dynamic int8 weights in its FlowLM (CPU, less memory, same voice file). Read at speech worker start. |
 

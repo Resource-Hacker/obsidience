@@ -129,6 +129,7 @@ class ProvisionalReply:
         self._advertised = ()
         self._text = ""
         self._offered = 0
+        self.progressive = None  # Shared sentence filter for a staged evidence reply.
         # Raw text handed to the worker and the open worker reply's playback.
         self.sent = ""
         self.playback_id: str | None = None
@@ -200,6 +201,13 @@ class ProvisionalReply:
             if held is not None and end > held:
                 break
             chunk = text[position:end].rstrip()
+            next_position = position + len(chunk)
+            if self.progressive is not None:
+                selected = self.progressive.select(chunk)
+                if not selected:
+                    position = self._offered = next_position
+                    continue  # SKIP or an exact sentence from an earlier evidence stage.
+                chunk = (' ' if self.sent else '') + selected
             if not any(character.isalpha() for character in chunk):
                 continue  # Join list numbers and blank lines to the next phrase.
             if position + len(chunk) > MAX_PROVISIONAL_CHARS:
@@ -212,7 +220,9 @@ class ProvisionalReply:
             if not await self._speech._provisional_say(self, chunk):
                 self._live = False
                 return
-            position = self._offered = position + len(chunk)
+            if self.progressive is not None:
+                self.progressive.record_spoken(chunk)
+            position = self._offered = next_position
 
 
 def _exit_description(returncode: int) -> str:

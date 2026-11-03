@@ -309,6 +309,20 @@ Review and execution receipts. Hyprland owns composition and desktop input;
 Quickshell presents native controls and panes, and a QtWebEngine presenter displays
 the shared React/Three.js knowledge graph.
 
+## Progressive visual context
+
+Voice replay can answer from a snapshot while a background worker prepares the
+recent screen history. The same Agent turn then receives a temporal overview
+and, when the sampled scene changed, selected detailed frames. Existing speech
+can play while the next model step reasons; cancellation drains the owned work.
+
+This reuses the screen recorder's GPU-encoded RAM history. The model currently
+receives labelled PNG images after CPU decoding, not a CUDA video buffer or
+mid-generation context updates. The shared continuation contract is available
+for additional read-only adapters; only voice `computer.replay` opts in today.
+See [Progressive perception](docs/modules/harness/progressive-perception.md) for
+the implementation, limits, and the researched native-video alternatives.
+
 ## Built on
 
 Obsidience composes maintained upstream projects, each behind one adapter that

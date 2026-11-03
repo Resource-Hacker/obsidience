@@ -338,6 +338,33 @@ neighbours); (9) history projected from the native conversation (no conversation
   that broke the marker protocol for the same words fails closed (no second attempt).
   Standby waits while a speculation is running or unadopted.
 
+### Progressive read-only evidence
+
+- One activation may refine a read-only observation across model steps through
+  `execution/progressive.py`. The evidence adapter owns one frozen snapshot,
+  finite stages, source identity, timestamps, modalities and cleanup. Only the
+  controller may continue its original Tool/arguments with an exact native call
+  ID; ordinary model calls cannot borrow the continuation or widen authority.
+- The first adopter is voice `computer.replay` with early speech enabled. A
+  saved endpoint precedes background keyframe preparation, then a mosaic and
+  selected chronological frames. Static sampled scenes omit the detail stage.
+  Text and Task calls return one completed result.
+- New evidence enters between model generations, while existing TTS may keep
+  playing. Later statements add or explicitly correct; SKIP and exact repeated
+  sentences are filtered consistently for speech and final text. Semantic
+  paraphrases still require model judgment. No stage grants input authority.
+- Producer/controller deadlines and the ordinary decision budget bound progress;
+  STOP, steering, source loss and failed/expired observations close and drain
+  their work. A confirmed unlocked Scene and unchanged recorder identity are
+  required before each stage. Historical endpoints are never labelled current.
+- This currently uses CPU-decoded PNGs over the existing model HTTP interface.
+  GPU-resident tensors, native video MIME, mid-generation visual updates, and
+  automatic progressive web/code/log adapters are not implemented. Further
+  adapters should reuse this contract only when intermediate evidence improves
+  the response, preserving their own provenance, grants and completion rules.
+- See `docs/modules/harness/progressive-perception.md`;
+  `realtime_progressive_evidence = false` restores one-result voice replay.
+
 ### Specialist Task loop
 
 - Scheduled, event and delegated Tasks use their accepted Runbooks and the same executor,

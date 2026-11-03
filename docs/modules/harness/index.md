@@ -83,6 +83,8 @@ reconnected or replayed. Reasoning stays private.
 ## In this section
 
 - [Realtime voice](voice.md): the speech pipeline from wake word to speaker.
+- [Progressive perception](progressive-perception.md): early visual answers, background
+  replay preparation, and the boundary between staged images and native video.
 - [Self-improvement](self-improvement.md): Heimdall's Audit and Harness2.
 
 The authoritative statement of these rules is

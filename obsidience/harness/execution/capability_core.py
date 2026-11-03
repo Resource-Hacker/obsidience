@@ -369,7 +369,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             "correction_allowed": True,
         }
         observation = json.dumps(result_object, sort_keys=True)
-    elif ((name in {"camera.observe", "computer.observe", "computer.act"}
+    elif ((name in {"camera.observe", "computer.observe", "computer.act", "computer.replay"}
            or name == "tv.control" and args.get("action") not in {
                "on", "off", "find", "volume", "volume_up", "volume_down", "mute", "unmute", "pause", "resume",
                "notice", "stop", "vod"})
