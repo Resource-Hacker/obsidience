@@ -2,7 +2,8 @@
 
 Jellyfin owns the catalogue, native client delivery and per-user resume. Obsidience
 adds discovery, explicit acquisition, a native Media pane and ordinary capability
-receipts. The television is one optional destination; media bytes never pass
+receipts. Home owns lighting and physical TV control. The television is one optional
+device consumed by Media; media bytes never pass
 through the model or the Harness. Local libraries and native Jellyfin Live TV are
 independent of the TV compositor, Sunshine and Moonlight route.
 

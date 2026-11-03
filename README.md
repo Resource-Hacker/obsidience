@@ -279,7 +279,7 @@ one of six types:
 | **Tool** | One registered executable interface; its schema and execution live in code |
 
 **Source** (immutable evidence), **Capability** (the code behind a Tool) and
-**Module** (a product component: Harness, Shell, Media, TV) are not Article types.
+**Module** (a product component: Harness, Shell, Media, Home) are not Article types.
 An **Activation** is one requested occurrence, a **Run** one attempt, and Tool
 **receipts** prove what was dispatched. The repository, the docs site, the issue
 labels and the changelog are organised by the same terms.
@@ -352,10 +352,12 @@ flowchart LR
     direction TB
     jf["Jellyfin"]
     prov["Tiramisu, TorBox,<br/>rclone, Prowlarr"]
+    tuner["TV delivery adapter<br/>tuner, mpv, Sunshine"]
   end
-  subgraph TV["TV"]
+  subgraph Home["Home"]
     direction TB
-    sun["Sunshine + Moonlight"]
+    lights["Matter lighting controller"]
+    tv["Physical TV adapter<br/>power, volume, remote"]
   end
   opt --> adk --> llama
   okf -->|"Knowledge Articles"| adk
@@ -367,7 +369,10 @@ flowchart LR
   qs --- cbm
   adk -->|"media Tools"| jf
   prov --> jf
-  sun -->|"plays from"| jf
+  jf -->|"exact source"| tuner
+  tuner -->|"optional device route"| tv
+  adk -->|"device Tools"| lights
+  adk -->|"device Tools"| tv
 ```
 
 | Component | Role | Upstream | License |
@@ -403,6 +408,25 @@ The full manual is the documentation site, **[resource-hacker.github.io/obsidien
 - [Installation knowledge](obsidience/defaults/README.md): the starter Vault and
   how defaults are published.
 
+## Media and Home
+
+[**Obsidience Media**](docs/modules/media.md) is an independent catalogue and
+playback product. Jellyfin owns the library, native client delivery and per-user
+watch/resume state. Obsidience adds title/source discovery, explicit exact-source
+acquisition, a native Media pane and verified playback controls. Registration,
+catalogue readiness and player start have separate receipts; a pending source is
+observed rather than registered again. Native clients use the same library with
+no television attached, and media bytes never pass through a model or the Harness.
+
+[**Obsidience Home**](docs/modules/home.md) owns lighting and physical-device
+control, including the TV's identity, power, volume, remote input and device-side
+lifecycle. Its native Matter controller owns commissioned lights; visualization
+is separately opt-in. Media consumes the TV as an optional Home device through
+the existing tuner/mpv and Sunshine/Moonlight route. The current `tv/` tree and
+`tv.control` interface still compose content and device operations; these module
+boundaries retain their existing paths, unit names and Tool IDs. Device setup,
+credentials and accepted grants stay private to each installation.
+
 ## Project layout
 
 | Path | Responsibility |
@@ -411,8 +435,9 @@ The full manual is the documentation site, **[resource-hacker.github.io/obsidien
 | `obsidience/shell/` | **Shell Module:** native desktop/session adapters, panes and graph presenter |
 | `obsidience/ui/` | Shared React/Three.js graph and interface bundle |
 | `obsidience/browser/edge/` | Edge Cast extension, its native messaging host and theme policy |
-| `obsidience/media/` | **Media Module:** media server units, provider launchers and the TorBox mount |
-| `obsidience/tv/` | **TV Module:** PC-hosted TV session (`host/`), its units (`systemd/`) and the Fire TV agent (`firetv-agent/`) |
+| `obsidience/media/` | [**Media Module**](docs/modules/media.md): independent catalogue, discovery, acquisition and playback; provider units and mounts here, client adapters in `harness/media/` |
+| `obsidience/lights/` | [**Home Module**](docs/modules/home.md): lighting controller, commissioning and encrypted native Matter state |
+| `obsidience/tv/` | Existing shared layout: Media playback/delivery (`host/`), units (`systemd/`) and Home physical TV agent (`firetv-agent/`); see the [TV route](docs/modules/tv.md) |
 | `obsidience/defaults/vault/` | Reviewed, distributable starter Articles |
 | `obsidience/vault/` | Ignored live Articles and local audit repository |
 | `obsidience/evidence/` | Ignored immutable Sources, Inbox and evidence |
@@ -424,6 +449,10 @@ The full manual is the documentation site, **[resource-hacker.github.io/obsidien
 Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
 `obsidience/shell/systemd/`, `obsidience/tv/systemd/` and the Media units in
 `obsidience/media/`. An installation copies them into `~/.config/systemd/user`.
+Home lighting units live in `obsidience/lights/systemd/`. Home groups the existing
+lighting and TV device adapters; it has no aggregate `obsidience/home/` daemon.
+Media consumes the TV as an optional device, while native Jellyfin clients use
+its catalogue independently. Compatibility paths and Tool IDs remain unchanged.
 
 Previously published Git history is distinct from the current installation
 snapshot. Removing live files from a new commit does not remove them from older

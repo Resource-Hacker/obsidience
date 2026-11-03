@@ -127,7 +127,9 @@ nav:
           - modules/shell/index.md
           - Graph UI: modules/shell/graph-ui.md
       - Media: modules/media.md
-      - TV: modules/tv.md
+      - Home:
+          - modules/home.md
+          - TV device and playback route: modules/tv.md
   - Integrations:
       - integrations/index.md
       - Harness2 and AutoSaddler: integrations/harness2.md

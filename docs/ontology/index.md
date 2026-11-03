@@ -68,7 +68,7 @@ Article types and never become authority:
 | --- | --- | --- |
 | **Source** | The real file or immutable evidence layer: a read-only view over System inventory, Knowledge Markdown, Evidence and Project Files. | [Sources and Capabilities](../sources-and-capabilities.md) |
 | **Capability** | The executable code behind one Tool, at `obsidience/harness/capabilities/<segments>/<leaf>.py`. | [Sources and Capabilities](../sources-and-capabilities.md#capabilities) |
-| **Module** | A top-level physical product component: Harness, Shell, Media, TV. | [Modules](../modules/index.md) |
+| **Module** | A top-level physical product component: Harness, Shell, Media, Home. | [Modules](../modules/index.md) |
 
 Plugins, services, events, frameworks, activations and executions are
 implementation or runtime roles, not Article types either.

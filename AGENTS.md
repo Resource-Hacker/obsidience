@@ -21,9 +21,21 @@ Use their essential workflow even in a checkout without them:
 
 ## Publication and installation knowledge
 
-When asked to publish the local version as `main`, use the local working tree
-as the source of truth. Fetching remote metadata does not authorize merging or
-rebasing remote changes into it; integrate GitHub changes only when requested.
+Keep internal development history separate from the GitHub publication clone.
+The installation contract identifies their locations and selected public scope.
+The internal checkout is the source of truth for local work; the publication
+clone stages only reviewed public changes and retains public history. Port exact
+files or hunks, never merge private commits, copy Git objects or mirror all refs.
+Fetching remote metadata does not authorize merging or rebasing it into internal
+work. Review new files and diffs, validate the affected behavior and scan for
+private data before an explicitly scoped push from the publication clone.
+
+Project Knowledge describes source and publication boundaries. Architecture
+explains implementation; application inventory describes the deployed instance.
+A published commit is not evidence of deployment. Source and Code graph views
+remain read-only projections. Local source edits require an explicitly assigned
+coding agent with a bounded owner request; project descriptions never grant the
+running Executive edit, shell or deployment capabilities.
 
 `obsidience/defaults/vault/` is the reviewed, tracked installation template.
 `obsidience/vault/`, `obsidience/evidence/`, `obsidience/state/`, local configuration

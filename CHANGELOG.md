@@ -6,12 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 While the major version is 0, any release may change interfaces.
 
-Entries are grouped by Module (Harness, Shell, Media, TV), and Harness entries
+Entries are grouped by Module (Harness, Shell, Media, Home), and Harness entries
 by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/Harness/action-ontology.md).
 
 ## [Unreleased]
 
 ### Fixed
+
+- **Harness.** Bind Code activity to exact project selectors so sibling and nested
+  publication checkouts cannot impersonate the active project. Include Media and
+  Home implementation files in Source and code-change notifications.
+- **Harness.** Remove obsolete external-session imports from public conversation
+  context and recall after the bot integration was excluded.
 
 - **Demo.** Restore the Code graph's project and folder hierarchy after filtering
   excluded source paths. Preserve connected tour targets, link folders to GitHub
@@ -32,7 +38,10 @@ by the concepts of the [Golden ontology](obsidience/defaults/vault/Architecture/
   admission and wake handling, and require evidence for action and playback claims.
 - **Shell.** Add native GameMode observation for Steam and configured Battle.net
   installations, optional workstation CPU policies, and Samsung game placement.
-- **TV.** Follow connected viewing clients and resolve desktop mirrors by Surface.
+- **Media.** Follow connected viewing clients and resolve desktop mirrors by Surface.
+- **Media and Home.** Expand the Media module reference and delineate Home for
+  lights and physical TV control. Media consumes the TV as an optional device;
+  existing paths, unit names and the composed `tv.control` interface remain unchanged.
 - **Hardware.** Add hardware inspection and bounded UVC camera recovery tooling.
 
 ### Removed

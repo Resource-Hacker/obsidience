@@ -1,5 +1,12 @@
 # TV host
 
+This is Media's workstation playback/delivery adapter for an optional Home TV
+device. Home owns physical identity, power, volume, remote input and the TV-side
+agent; `tv.control` currently composes those operations with content control.
+The mixed `tv/` layout and existing unit/Tool IDs remain compatibility contracts.
+See the [Home boundary](../../../docs/modules/home.md) and
+[Media module](../../../docs/modules/media.md).
+
 The television shows a session hosted on the workstation: content plays here and
 the Fire TV only displays it through Moonlight. Fire OS is the display client, not
 the place where channels load.

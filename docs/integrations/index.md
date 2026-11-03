@@ -19,9 +19,11 @@ each integration in prose; the lock file is the authoritative record.
 ## Where each integration sits
 
 The product's Modules are its physical components: the **Harness** (agent
-runtime and API), the **Shell** (desktop session and panes), **Media** (catalogue
-and acquisition) and the **TV** (a separate streaming session). Integrations
-plug into one Module each.
+runtime and API), the **Shell** (desktop session and panes), **Media** (catalogue,
+discovery, acquisition, playback and progress) and **Home** (lighting and physical
+TV control). Each integration retains one owner; the Media TV delivery adapter
+consumes Home's optional device interface. The existing source layout and
+`tv.control` still compose those concerns; see [Home](../modules/home.md).
 
 ```mermaid
 flowchart TB
@@ -47,9 +49,11 @@ flowchart TB
   subgraph MediaM["Media Module"]
     jf["Jellyfin catalogue"]
     tir["Tiramisu / TorBox + rclone"]
+    sun["TV delivery<br/>tuner / mpv / Sunshine"]
   end
-  subgraph TV["TV Module"]
-    sun["Sunshine stream"]
+  subgraph Home["Home Module"]
+    lamps["Matter controller"]
+    tv["Physical TV adapter<br/>power / volume / remote"]
   end
   adk --> llama
   opt --> adk
@@ -60,8 +64,11 @@ flowchart TB
   qs --> Harness
   canvas --> qs
   Harness --> jf
-  jf --> tir
-  TV --> jf
+  tir --> jf
+  jf --> sun
+  sun -->|"optional device route"| tv
+  Harness --> lamps
+  Harness --> tv
 ```
 
 ## Pages

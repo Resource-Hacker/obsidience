@@ -12,10 +12,10 @@
   description: "Shell: compositor, session, panes, graph UI and Edge Cast (shell/, ui/, browser/edge/)"
 - name: "module:media"
   color: "047857"
-  description: "Media: the catalogue service and its providers (obsidience/media/)"
-- name: "module:tv"
+  description: "Media: catalogue, discovery, exact-source acquisition, playback and progress"
+- name: "module:home"
   color: "b45309"
-  description: "TV: the PC-hosted TV session, its units and the Fire TV agent (obsidience/tv/)"
+  description: "Home: lighting and physical TV identity, commissioning, power, volume and remote control"
 
 # Article types (Golden ontology)
 - name: "type:knowledge"

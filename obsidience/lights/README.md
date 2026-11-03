@@ -1,5 +1,10 @@
 # Native Matter lights controller
 
+This controller belongs to [Obsidience Home](../../docs/modules/home.md), which
+owns lighting and physical TV control. Media may consume Home devices without
+owning their commissioning, state or control lifecycle. The existing `lights/`
+path, controller unit and `lights.*` capability IDs remain unchanged.
+
 One stable `@matter/main` 0.17.9 `ServerNode` with `ControllerBehavior` owns the
 fabric, peers, sessions and subscriptions. No WiZ fallback or second controller.
 Fixture aliases become stable native peer IDs. The existing lights capability and visualizer use this controller. Music visualization

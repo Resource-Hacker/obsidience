@@ -33,7 +33,9 @@ schedule upgrades or play media. Provider or
 registration success is separate from Jellyfin catalogue readiness and
 verified playback.
 
-The TV is an optional playback destination, not a media authority. A configured
+[Home](/Architecture/Home/Home.md) owns lighting and physical TV identity,
+power, volume and remote control. Media consumes that TV as an optional playback
+destination; it is not a media authority. A configured
 native Jellyfin client consumes server delivery; it does not register media or
 control acquisition. The existing workstation TV route remains a separate
 adapter: its tuner is the sole controller of its mpv, while its compositor,

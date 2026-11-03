@@ -7,6 +7,8 @@ sources:
 - resource: obsidience/shell/qml/shell.qml
 - resource: obsidience/media/README.md
 - resource: obsidience/tv/host/README.md
+- resource: obsidience/lights/README.md
+- resource: docs/modules/home.md
 ---
 
 Architecture explains the design of this Obsidience environment. It is shared
@@ -25,12 +27,15 @@ additional runtime authority.
   React/Three.js graph bundle in `obsidience/ui/`, and its Edge Cast client (the
   browser extension, native messaging host and theme policy) is in
   `obsidience/browser/edge/`.
-- Media (`obsidience/media/`): the independent catalogue and delivery service and its
-  provider units; see [Media integration](/Architecture/Harness/media-integration.md).
-  The Harness's media clients and Tools use it and own no second media database.
-- TV (`obsidience/tv/`): the PC-hosted television session, its units and the Fire TV
-  agent. It is one optional playback destination, controlled through
-  [tv.control](/Tools/tv.control.md).
+- [Media](/Architecture/Media/Media.md): the independent catalogue, discovery,
+  exact-source acquisition, content playback/delivery and progress product. Units
+  and providers live in `obsidience/media/`; Harness adapters own no second media
+  database. The existing `obsidience/tv/host/` is its workstation delivery route.
+- [Home](/Architecture/Home/Home.md): lights and physical-device identity,
+  commissioning, state, power, volume and remote control. Existing implementations
+  live in `obsidience/lights/`, Harness device adapters and the TV agent in
+  `obsidience/tv/firetv-agent/`. Media consumes the TV as an optional device;
+  `tv.control` currently composes content and device operations.
 
 These Articles describe the implementation, not live state. Current application
 and device inventory belongs in the local System inventory;

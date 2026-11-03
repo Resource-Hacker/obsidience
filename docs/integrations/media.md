@@ -3,7 +3,8 @@
 Obsidience Media is an optional, independent media server and catalogue.
 Jellyfin owns the catalogue, client delivery and per-user resume; Obsidience
 adds discovery, explicit acquisition, a native Media pane and ordinary
-capability receipts. The television is one optional client. Media bytes never
+capability receipts. The television is one optional [Home](../modules/home.md) device; native clients
+use the catalogue independently. Media bytes never
 pass through the model or the Harness, and the integration defaults disabled.
 
 | Component | Upstream | Pinned | License | Role |
@@ -40,7 +41,7 @@ flowchart LR
   fuse --> jf
   local["Local libraries<br/>read-only"] --> jf
   jf --> clients["Native clients<br/>desktop, phone"]
-  jf --> tuner["TV tuner<br/>(TV Module)"]
+  jf --> tuner["Media tuner<br/>(optional Home TV route)"]
   exec -->|"targeted refresh,<br/>exact readback"| jf
 ```
 
@@ -63,7 +64,7 @@ flowchart LR
 | `harness/media/jellyfin.py`, `progress.py` | Jellyfin REST reads, exact library refresh and resume reporting |
 | `harness/media/tiramisu.py`, `torbox.py`, `torbox_files.py`, `discovery.py`, `sources.py` | Provider adapters and the local file admission contract |
 | `harness/capabilities/media/` | The `media.library` and `media.acquire` Tools; they use only the adapters' public functions |
-| `tv/host/tuner.py` | Playback on the TV destination (TV Module) |
+| `tv/host/tuner.py` | Media playback owner for the optional Home TV destination; retained compatibility path |
 
 ## Configuration
 

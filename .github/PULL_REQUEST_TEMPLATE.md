@@ -4,7 +4,7 @@
 
 ## Where
 
-<!-- Module(s): Harness, Shell, Media, TV. Article types touched, if any: Knowledge, Agent, Task, Runbook, Skill, Tool. -->
+<!-- Module(s): Harness, Shell, Media, Home. Article types touched, if any: Knowledge, Agent, Task, Runbook, Skill, Tool. -->
 
 ## Validation
 

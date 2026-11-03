@@ -165,6 +165,6 @@ does.
 | [Articles](articles/index.md) | One page per Article type, with the starter Vault's actual instances |
 | [Sources and Capabilities](sources-and-capabilities.md) | The evidence layer and the code-owned Tool contracts, receipts and no-replay |
 | [Memory](memory.md) | Hindsight banks per Agent: historical, unverified, separate from Knowledge |
-| [Modules](modules/index.md) | Harness, Shell, Media and TV, the four product components |
+| [Modules](modules/index.md) | Harness, Shell, Media and Home, the four product components |
 | [Integrations](integrations/index.md) | The adopted upstream components and how they are wired in |
 | [Development](development.md) | The development loop, validation policy and checks |

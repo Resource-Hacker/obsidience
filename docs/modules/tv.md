@@ -1,11 +1,16 @@
-# TV
+# TV device and playback route
 
-The TV Module (`obsidience/tv/`) hosts a television session **on the
-workstation**: content plays on the PC, and the television only displays it
+[Home](home.md) owns the physical television: device identity, power, volume,
+remote input and its device-side agent. [Media](media.md) owns the content and
+playback route, consuming that TV as an optional device. The existing
+`obsidience/tv/` tree and `tv.control` interface span these concerns; their paths,
+unit names and Tool ID remain unchanged.
+
+The workstation route hosts a television session **on the workstation**: content plays on the PC, and the television only displays it
 through a game-streaming client (Moonlight). The TV's own operating system is
 the display client, not the place where channels or apps load. It is one
-optional playback destination of [Media](media.md), controlled through the
-`tv.control` Tool.
+optional playback destination of Media, controlled through the existing
+`tv.control` composition. Native Jellyfin clients need none of this route.
 
 | Path | Holds |
 | --- | --- |

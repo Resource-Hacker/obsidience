@@ -9,11 +9,13 @@ tool, alter either agent or write either graph.
 from __future__ import annotations
 
 import asyncio
+import ast
 from collections import OrderedDict
 import hashlib
 import json
 from pathlib import Path
 import re
+import shlex
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -27,9 +29,137 @@ TOOLS = {"search_graph": ("search", "Found"), "search_code": ("search", "Found")
          "index_status": ("read", "Index status"), "check_index_coverage": ("read", "Checked coverage")}
 IGNORED = {".git", "node_modules", "__pycache__", ".venv", ".artifacts", "out",
            ".ruff_cache", "state", "vault", "evidence", "defaults"}
-EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".mjs", ".qml", ".css", ".c", ".h", ".sh", ".toml"}
+EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".mjs", ".qml", ".css", ".c", ".h", ".java", ".xml", ".sh", ".toml"}
 # A lookup's public subject: the first of these present, then trace_path's route.
 SUBJECTS = ("query", "name_pattern", "qn_pattern", "function_name", "qualified_name", "pattern", "semantic_query")
+
+
+def _argument_object(value):
+    """Read literal argument fields without evaluating journaled code."""
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return {}
+    try:
+        node = ast.parse(value.strip(), mode="eval").body
+    except (SyntaxError, ValueError, RecursionError):
+        return {}
+    if not isinstance(node, ast.Dict):
+        return {}
+    fields = {}
+    for key, child in zip(node.keys, node.values):
+        key = key.id if isinstance(key, ast.Name) else key.value if isinstance(key, ast.Constant) else None
+        if isinstance(key, str) and isinstance(child, ast.Constant) and isinstance(child.value, str):
+            fields[key] = child.value
+    return fields
+
+
+def _quoted_end(text, start):
+    quote, at = text[start], start + 1
+    while at < len(text):
+        if text[at] == "\\":
+            at += 2
+        elif text[at] == quote:
+            return at + 1
+        else:
+            at += 1
+    return len(text)
+
+
+def _cli_lookups(command):
+    """Only an actual provider CLI command head supplies project selectors."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n<>")
+        lexer.whitespace = " \t\r"
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    # One literal command only. Quoting is erased by shlex, so interpreting
+    # separated clauses could turn printed examples or heredoc bodies into calls.
+    if any(token and all(char in ";&|()\n<>" for char in token) for token in tokens):
+        return []
+    words = tokens
+    if words[:1] == ["env"]:
+        words = words[1:]
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", words[0]):
+        words = words[1:]
+    if (len(words) < 3 or Path(words[0]).name != "codebase-memory-mcp"
+            or words[1] != "cli" or words[2] not in TOOLS):
+        return []
+    fields = {}
+    for at, token in enumerate(words[3:], 3):
+        flag, equals, value = token.partition("=")
+        if flag in {"--project", "--repo-path"}:
+            value = value if equals else words[at + 1] if at + 1 < len(words) else ""
+            key = flag[2:].replace("-", "_")
+            if key in fields and fields[key] != value:
+                fields[key] = ""  # Conflicting selectors never attest one project.
+            else:
+                fields[key] = value
+    return [(words[2], fields)]
+
+
+def code_lookups(name, arguments):
+    """Extract explicitly bound MCP/CLI calls, including functions.exec wrappers."""
+    direct = re.fullmatch(r"(?:.*__)?obsidience_code__(\w+)", name)
+    if direct and direct[1] in TOOLS:
+        return [(direct[1], _argument_object(arguments))]
+    if name.rsplit(".", 1)[-1] == "exec_command":
+        return _cli_lookups(_argument_object(arguments).get("cmd", ""))
+    if name.rsplit(".", 1)[-1] != "exec" or not isinstance(arguments, str):
+        return []
+    # Skip strings and comments: quoted/printed examples are not invocations.
+    pattern = re.compile(r"tools\.(?:(?:mcp__)?obsidience_code__(\w+)|(exec_command))\s*\(\s*\{")
+    result, at = [], 0
+    while at < len(arguments):
+        if arguments[at] in "\"'`":
+            at = _quoted_end(arguments, at)
+            continue
+        if arguments.startswith("//", at):
+            end = arguments.find("\n", at)
+            at = len(arguments) if end < 0 else end + 1
+            continue
+        if arguments.startswith("/*", at):
+            end = arguments.find("*/", at + 2)
+            at = len(arguments) if end < 0 else end + 2
+            continue
+        match = (pattern.match(arguments, at)
+                 if at == 0 or not (arguments[at - 1].isalnum() or arguments[at - 1] in "_.$") else None)
+        if match is None:
+            at += 1
+            continue
+        start, end, depth = match.end() - 1, match.end(), 1
+        while end < len(arguments) and depth:
+            if arguments[end] in "\"'`":
+                end = _quoted_end(arguments, end)
+                continue
+            depth += (arguments[end] == "{") - (arguments[end] == "}")
+            end += 1
+        fields = _argument_object(arguments[start:end]) if depth == 0 else {}
+        if match[1] in TOOLS:
+            result.append((match[1], fields))
+        elif match[2]:
+            result.extend(_cli_lookups(fields.get("cmd", "")))
+        at = end
+    return result
+
+
+def project_matches(fields, project, project_id):
+    """Only exact explicit selectors bind activity to this repository."""
+    selected = {key: fields[key] for key in ("project", "repo_path") if key in fields}
+    if not selected:
+        return False
+    for key, value in selected.items():
+        if key == "project" and value == project_id:
+            continue
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            return False
+        try:
+            if Path(value).resolve() != project:
+                return False
+        except (OSError, RuntimeError, ValueError):
+            return False
+    return True
 
 
 def lookup_detail(tool, args, agent):
@@ -153,7 +283,8 @@ class CodeActivity(FileSystemEventHandler):
             if journals.is_dir():
                 self.observer.schedule(self, str(journals), recursive=True)
         self.observer.schedule(self, str(self.project), recursive=False)
-        for relative in ("obsidience/harness", "obsidience/shell/qml", "obsidience/ui/src", "obsidience/scripts"):
+        for relative in ("obsidience/harness", "obsidience/lights", "obsidience/media", "obsidience/tv",
+                         "obsidience/shell/qml", "obsidience/ui/src", "obsidience/scripts"):
             directory = self.project / relative
             if directory.is_dir():
                 self.observer.schedule(self, str(directory), recursive=True)
@@ -285,23 +416,16 @@ class CodeActivity(FileSystemEventHandler):
         call = str(item.get("call_id", ""))
         key = (path, call)
         if kind in {"function_call", "custom_tool_call"}:
-            args = item.get("arguments", item.get("input", ""))
-            if not isinstance(args, str):
-                args = json.dumps(args)
-            name = str(item.get("name", ""))
-            matches = re.findall(r"obsidience_code__(\w+)", name + " " + args)
-            if not matches and "codebase-memory-mcp" in args:
-                matches = [tool for tool in TOOLS if re.search(r"\b" + tool + r"\b", args)]
-            matches = list(dict.fromkeys(t for t in matches if t in TOOLS))
-            if not matches:
+            lookups = code_lookups(str(item.get("name", "")), item.get("arguments", item.get("input", "")))
+            # A wrapper's combined result cannot be split between project graphs.
+            if not lookups or not all(project_matches(fields, self.project, self.graph_id[5:])
+                                      for _tool, fields in lookups):
                 return
-            scoped = str(self.project) in args or self.graph_id[5:] in args
-            if not scoped:
-                return
+            matches = list(dict.fromkeys(tool for tool, _fields in lookups))
             operation_id = agent.lower() + ":" + hashlib.sha256((path + call).encode()).hexdigest()[:28]
             label = agent + " · " + ", ".join(TOOLS[t][1] for t in matches)
             action = TOOLS[matches[0]][0]
-            detail = lookup_detail(matches[0], item.get("arguments", item.get("input", "")), agent)
+            detail = lookup_detail(matches[0], lookups[0][1], agent)
             self.pending[key] = (operation_id, action, label, detail)
             while len(self.pending) > 128:
                 _, (old_id, old_action, old_label, old_detail) = self.pending.popitem(last=False)

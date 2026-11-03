@@ -168,9 +168,6 @@ def recall_query(text, conversation_id=None, before_sequence=None):
     if not conversation_id:
         return text, ''
     from ..knowledge.index import INDEX
-    from .adk.sessions import binding
-    if (external := binding(conversation_id)) is not None:
-        return text, ' '.join(external.previous_request().split())[:200]
     turns = INDEX.conversation_turns(conversation_id, before_sequence=before_sequence, limit=8)
     owner = next((turn for turn in reversed(turns) if turn['role'] == 'user'), None)
     return text, ' '.join(owner['text'].split())[:200] if owner else ''
@@ -236,13 +233,9 @@ async def turn_recall(ctx, query, *, emit, run, context_text='', evaluation=None
     params = ctx.get('params') or {}
     query = (query, '')
     if evaluation is None and params.get('conversation_id'):
-        from .adk.sessions import binding
-        if binding(params['conversation_id']) is not None:
-            query = recall_query(query[0], params['conversation_id'])
-        else:
-            from ..knowledge.index import INDEX
-            turn = INDEX.conversation_turn(params['reply_to_turn_id']) or {}
-            query = recall_query(query[0], params['conversation_id'], turn.get('sequence'))
+        from ..knowledge.index import INDEX
+        turn = INDEX.conversation_turn(params['reply_to_turn_id']) or {}
+        query = recall_query(query[0], params['conversation_id'], turn.get('sequence'))
     prefetched = ctx.pop('_memory_recall', None)
     if evaluation is not None:
         value = {'status': 'disabled', 'memories': []}

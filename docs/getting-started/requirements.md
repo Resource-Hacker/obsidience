@@ -92,7 +92,8 @@ See [Realtime voice](../modules/harness/voice.md).
 | SearXNG | Local `web.search` (otherwise a DDGS fallback is used) | `[web] searxng_url` |
 | Harness2 and AutoSaddler | Heimdall's instruction improvement (`harness.optimize`) | `python3 obsidience/scripts/install-optimization` |
 | Jellyfin and media providers | The [Media](../modules/media.md) module | private `obsidience/state/media.json` |
-| A PC-hosted TV session | The [TV](../modules/tv.md) module | units in `obsidience/tv/systemd/` |
+| Lights and physical TV control | [Home](../modules/home.md), using existing device adapters | Private device registration and controller configuration |
+| A PC-hosted TV playback session | Media delivery through the optional [Home TV route](../modules/tv.md) | units in `obsidience/tv/systemd/` |
 
 Each optional provider is off until you configure it. Memory never falls back
 silently: missing Hindsight provider configuration fails at startup, and

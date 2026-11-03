@@ -10,8 +10,8 @@ runtime authority.
 | --- | --- | --- |
 | [Harness](harness/index.md) | `obsidience/harness/` | Ontology, activation, retrieval, model selection, conversation memory, speech ingress, research, publication and the Capabilities behind every Tool |
 | [Shell](shell/index.md) | `obsidience/shell/` (+ `obsidience/ui/`, `obsidience/browser/edge/`) | Compositor and native Surface ownership, desktop scene targeting and panes; the shared React/Three.js graph bundle; the Edge Cast client |
-| [Media](media.md) | `obsidience/media/` | The independent catalogue and delivery service and its provider units |
-| [TV](tv.md) | `obsidience/tv/` | The PC-hosted television session, its units and the Fire TV agent |
+| [Media](media.md) | `obsidience/media/`, `obsidience/harness/media/`, existing `obsidience/tv/host/` adapter | Catalogue, discovery, exact-source acquisition, content playback/delivery and progress |
+| [Home](home.md) | Existing `obsidience/lights/` and TV device adapters | Lights and physical-device identity, commissioning, state, power, volume and remote control |
 
 ## How the pieces fit
 
@@ -77,7 +77,8 @@ flowchart TB
 | `obsidience/ui/` | Shared React/Three.js graph and interface bundle |
 | `obsidience/browser/edge/` | Edge Cast extension, its native messaging host and theme policy |
 | `obsidience/media/` | Media server units, provider launchers and mounts |
-| `obsidience/tv/` | PC-hosted TV session (`host/`), its units (`systemd/`) and the Fire TV agent (`firetv-agent/`) |
+| `obsidience/tv/` | Existing mixed layout: Media playback/delivery in `host/`, shared units in `systemd/`, Home TV device agent in `firetv-agent/` |
+| `obsidience/lights/` | Home lighting controller, commissioning, encrypted native Matter state and its unit |
 | `obsidience/defaults/vault/` | Reviewed, distributable starter Articles |
 | `obsidience/vault/`, `evidence/`, `state/` | Ignored live Vault, Sources and runtime state |
 | `obsidience/scripts/` | Development and runtime entry points |
@@ -87,6 +88,8 @@ Unit sources live beside the code that owns them: `obsidience/harness/systemd/`,
 `obsidience/shell/systemd/`, `obsidience/tv/systemd/` and the Media units in
 `obsidience/media/`. An installation copies them into `~/.config/systemd/user`.
 
-Optional room lights outside the four Modules live in
-`obsidience/lights/` and use the same Agent, Tool and
-receipt contracts.
+[Home](home.md) groups the existing lighting and physical TV adapters.
+[Media](media.md) consumes the TV as an optional device while native clients use
+its catalogue directly. The current `tv/` source layout and `tv.control` interface
+span both concerns; the [TV route](tv.md) documents their composition. Module
+boundaries do not add an aggregate runtime package or rename compatibility IDs.
