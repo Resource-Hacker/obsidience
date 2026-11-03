@@ -175,6 +175,49 @@ Full duplex would additionally need an explicit protocol for concurrent incoming
 evidence and outgoing responses, rather than assuming ordinary request/response
 generation can accept arbitrary context updates.
 
+## Experimental TensorRT-LLM route
+
+An isolated evaluation on 2026-11-03 ran TensorRT-LLM
+`1.4.0rc3.dev202610310007` (PyTorch backend, source
+[`c94fc1c5`](https://github.com/NVIDIA/TensorRT-LLM/tree/c94fc1c5ada2272b7589711354eaf3b646709513))
+on two 20 GB RTX 4000 Ada GPUs. It used the
+[NVIDIA Gemma 4 26B-A4B NVFP4 checkpoint](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4/tree/a19cfe00be84568a6867111c9a68c9c44fdcffe6),
+Marlin kernels, tensor/expert parallelism of two and a 4,096-token context.
+This is a different checkpoint and quantization from the deployed GGUF model;
+there was no matched quality or long-conversation comparison.
+
+The original FP8 KV cache failed during large-head attention warm-up. The exact
+[FlashInfer 0.6.18 selector](https://github.com/flashinfer-ai/flashinfer/blob/v0.6.18/flashinfer/jit/attention/modules.py)
+requires newer GPU architectures for that one-byte-cache path. A separate
+metadata-only variant disabled KV quantization and used BF16 KV while retaining
+the original NVFP4 weight files read-only. That variant served text and images.
+No host driver upgrade or production backend replacement was performed.
+
+The final bounded run used synthetic images, a 256-token ceiling, temperature
+zero and disabled thinking. One text warm-up preceded three measured samples:
+
+| Measurement | Observed result | Limit |
+| --- | --- | --- |
+| Warm text first public output | Median 112.55 ms | Short standalone prompt; no live Agent or audio path. |
+| Text completion rate | 31.33 tokens/s, including request overhead | Different model/quantization; no speedup claim against the current runtime. |
+| Three warm image replies | 137.27–687.02 ms to first public output | Replies violated the required color-first format; visual correctness acceptance failed. |
+| Three concurrent response streams | All completed; synthetic evidence preparation overlapped generation | Later evidence entered a new request, never an already-generating request. |
+| Cancellation | Unverified backend drain | Native gauges did not establish a fresh idle baseline; that run dispatched no cancellation. |
+
+A preceding cold image request took 29.3 seconds to first public output. The
+image replies began with an analysis preamble instead of the requested label,
+so completion and speed are not evidence of correct perception. An earlier run
+closed its client stream successfully, but that does not establish that backend
+work drained. The final observer deliberately required idle → active → idle
+before making any cancellation-latency claim; its missing baseline remains a
+failed observation rather than an inferred success.
+
+This experiment remains outside the deployed Harness. It does not implement
+GPU-frame ingress, zero-copy video, arbitrary mid-generation context updates,
+spoken interruption or native full duplex. Production adoption still requires
+correct image responses, trustworthy cancellation, matched quality and latency
+measurements, and integration with existing evidence and resource ownership.
+
 ## Extending the pattern
 
 The reusable pattern is **preview → targeted evidence → deeper detail**
