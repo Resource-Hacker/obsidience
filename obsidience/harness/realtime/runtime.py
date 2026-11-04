@@ -469,8 +469,8 @@ class RealtimeSessionManager:
     async def _capture_stalled(self, seconds: Any) -> None:
         """The worker's capture delivered no frames: end it explicitly, like a lost device.
 
-        A stalled UMA-8 keeps its endpoint generation, so recovery waits for a new one
-        (a reconnect); reopening the hung device would only stall again.
+        Callback absence does not establish a USB fault. Preserve clock evidence
+        before teardown; a power-cycle helper may act only on approved hardware.
         """
         async with self._lock:
             if self._closed or self._desired_mode == "off":
@@ -487,18 +487,21 @@ class RealtimeSessionManager:
             self._transport_ready = False
             self._last_error = (
                 f"The microphone stopped delivering audio ({seconds} s without frames)"
-                + ("; the UMA-8 USB device has stalled." if uma8 else ".")
+                + ("; the UMA-8 capture path stopped." if uma8 else ".")
             )[:MAX_EVENT_TEXT]
-            trace.emit("error", "Microphone capture stalled", [self._last_error])
+            details = [self._last_error]
+            if uma8:
+                details.extend(await asyncio.to_thread(media_runtime.uma8_stall_evidence))
+            trace.emit("error", "Microphone capture stalled", details)
             await self._publish("state", reason="audio_stalled")
         await self.stop(preserve_requested=True, audio_lost=True)
         if not uma8:
             return
-        # Removing power revives the hung UMA-8. Behind the USB-C dock's switching
-        # hub that is one bounded software power cycle; on a root port the helper
-        # resets the port instead. The reconnect path then restarts voice on the
-        # new endpoint generation. A repeat within UMA8_POWER_CYCLE_SECS is not
-        # cycled again: it stays an explicit fault.
+        # The helper may power-cycle an approved switching hub port. On other
+        # ports it must leave USB connected: a logical reset has previously
+        # converted an unproven capture stall into persistent USB absence.
+        # The reconnect owner admits a changed endpoint generation; repeats
+        # within UMA8_POWER_CYCLE_SECS remain explicit faults.
         now = time.monotonic()
         recent = now - self._uma8_power_cycled_at < UMA8_POWER_CYCLE_SECS
         if not recent:
@@ -514,9 +517,9 @@ class RealtimeSessionManager:
         async with self._lock:
             if self._audio_reconnect_pending:
                 self._last_error = (
-                    "The UMA-8 stalled again within minutes of an automatic power cycle. Unplug and reconnect it."
+                    "The UMA-8 capture path stopped again shortly after a recovery attempt; automatic cycling is paused."
                     if recent else
-                    "The UMA-8 stalled and did not recover automatically. Unplug and reconnect it."
+                    "The UMA-8 capture path stopped and automatic recovery was unavailable or failed; USB failure is unconfirmed."
                 )
                 await self._publish("state", reason="audio_stalled")
 

@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
-# Power-cycle the miniDSP UMA-8 (2752:001c) through its hub port's power switch,
-# or reset its port where nothing can switch power.
+# Power-cycle the miniDSP UMA-8 (2752:001c) through an approved hub power switch.
+# Never reset a non-switching port after a software capture stall.
 #
-# The UMA-8 can hang with its capture PCM RUNNING and no kernel error, or with
-# every control request failing (-71). Removing power always revives it; that
-# works only behind a hub that really switches per-port power (the self-powered
-# USB-C dock: VIA VL822 2109:2822, Realtek RTS5411 0bda:5411; the kernel's port
-# `disable` attribute clears PORT_POWER). The chipset's root ports have no power
-# switching, so there it gets a USB port reset instead: that revived the -71 hang
-# on root port 8-4 (2026-10-19) but did not revive the 2026-10-09 hang on 10-3.
-# Installed root-owned as /usr/local/libexec/obsidience-uma8-power-cycle and run
-# by Realtime through `sudo -n` after a detected capture stall.
+# Capture delivery can stop without a USB fault. A root-port USB reset then
+# disconnected the UMA-8 indefinitely on 2026-10-28 and 2026-11-04; it does not
+# remove power. Only the allow-listed, individually switching dock hub ports
+# below can perform this recovery. Leave all other endpoints connected so the
+# audio layer can inspect/reopen them without a destructive USB reset.
+# Installed root-owned as /usr/local/libexec/obsidience-uma8-power-cycle.
 set -euo pipefail
 
 exec 9>/run/obsidience-uma8-power-cycle.lock
@@ -28,8 +25,7 @@ done
 name=${dev##*/}
 devnum=$(<"$dev/devnum")
 
-# A power cycle, or a reset it dropped off in, ends when the UMA-8 is back on the
-# same port as a new device.
+# A power cycle ends when the UMA-8 is back on the same port as a new device.
 await_return() {
     for _ in $(seq 1 30); do
         sleep 0.5
@@ -60,12 +56,5 @@ if [[ -n $control && -w $control ]]; then
     await_return power-cycled 'power cycle'
 fi
 
-# A device that answers after the reset keeps its number and gets its drivers
-# rebound (a new sound card generation); a hung one drops off ("failed [No such
-# device]") and enumerates again as a new device.
-result=$(/usr/bin/usbreset "$(printf '%03d/%03d' "$(<"$dev/busnum")" "$devnum")" 2>&1 || true)
-if [[ $result == *' ok' ]]; then
-    echo "UMA-8 reset in place on $name (its port cannot switch power)"
-    exit 0
-fi
-await_return 're-enumerated after a port reset' 'port reset'
+echo "UMA-8 $name is on a port without an approved power switch; leaving USB connected" >&2
+exit 69

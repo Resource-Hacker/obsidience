@@ -423,6 +423,47 @@ def _uma8_reference_graph(speaker: str, *, require_capture: bool = True) -> tupl
     return graph, endpoints
 
 
+def uma8_stall_evidence() -> list[str]:
+    """Read scalar clock/USB state before teardown; never open an audio device."""
+    def read(path: Path) -> str:
+        try:
+            return path.read_text(encoding="ascii").strip()[:256]
+        except (OSError, UnicodeError):
+            return "unavailable"
+
+    matches = [path for path in Path("/sys/bus/usb/devices").glob("*")
+               if read(path / "idVendor") == "2752" and read(path / "idProduct") == "001c"]
+    if len(matches) != 1:
+        return [f"UMA USB matches={len(matches)}"]
+    device = matches[0]
+    number = read(device / "devnum")
+    cards = list(device.glob("*:*/sound/card[0-9]*"))
+    evidence = [f"USB port={device.name} devnum={number} "
+                f"power={read(device / 'power/control')} "
+                f"runtime={read(device / 'power/runtime_status')} "
+                f"suspended_ms={read(device / 'power/runtime_suspended_time')}"]
+    if len(cards) != 1:
+        return evidence + [f"UMA ALSA cards={len(cards)}"]
+    card = cards[0].name
+    def snapshot() -> list[str]:
+        rows = []
+        for direction in ("c", "p"):
+            path = Path("/proc/asound") / card / f"pcm0{direction}/sub0/status"
+            fields = {}
+            for line in read(path).splitlines():
+                key, separator, value = line.partition(":")
+                if separator and key.strip() in {"state", "hw_ptr", "appl_ptr", "tstamp"}:
+                    fields[key.strip()] = value.strip()
+            rows.append(f"{direction} " + " ".join(f"{key}={value}" for key, value in fields.items()))
+        return rows
+    evidence.extend("before " + row for row in snapshot())
+    time.sleep(0.2)
+    if read(device / "idVendor") != "2752" or read(device / "devnum") != number:
+        return evidence + ["USB generation changed during stall observation"]
+    evidence.extend("after " + row for row in snapshot())
+    return evidence
+
+
 def uma8_reference_state(speaker: str) -> tuple[bool, tuple | None]:
     """Check admitted resources on an audio-device event, never by idle polling.
 
