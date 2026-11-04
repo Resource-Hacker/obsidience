@@ -33,7 +33,7 @@ def estimate(spec, profile: dict, devices: tuple[str, ...]) -> dict[str, int]:
                # Match llm.sh defaults; Gemma retains F16 KV and its projector.
                # This estimator aborts for tensor mode; its layer split places
                # the same weights and KV across the selected GPUs.
-               "-b", "4096", "-ub", "1024", "-fa", "on",
+               "-b", "4096", "-ub", "1280", "-fa", "on",
                "--split-mode", "none" if len(devices) == 1 else "layer"]
     if len(devices) > 1:
         # The server splits by free memory, and its model GPUs are empty at

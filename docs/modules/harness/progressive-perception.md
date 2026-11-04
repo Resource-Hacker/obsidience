@@ -190,6 +190,100 @@ a native Tool-call interface. Missing measurements remain open questions, and
 ordinary configuration or integration defects should be investigated before
 dismissing an approach.
 
+## Quality-preserving llama.cpp profile — 2026-11-04
+
+The hardware tuning pass retained llama.cpp and evaluated 21 complete launch
+profiles with the existing bounded workload, plus targeted existing CUDA
+operator checks. The selected profile preserves the current target/draft/projector
+weights, F16 KV, context per lane, dynamic lane ownership and two-token MTP.
+It does not claim a universal 300 ms visual response.
+
+### Image detail and the accepted correction
+
+The old 512 image-token limit was a real detail limit for larger images. It is
+replaced by Gemma 4's highest supported budget, **1120**. This is the highest
+supported setting, not the Hugging Face processor default, which is 280.
+Small images below the limit retain their existing token count; larger images
+can retain more information and take longer to process. Even 1120 does not
+preserve a full-resolution desktop pixel-for-pixel, so regional evidence still
+matters for small labels. See [Google's image-resolution guidance](https://ai.google.dev/gemma/docs/capabilities/vision/image).
+
+The paired projector lacks activation metadata. The pinned loader therefore
+selected QuickGELU although Gemma 4 expects tanh GELU. The selected runtime
+backports the exact two-line correction from merged
+[llama.cpp PR30882](https://github.com/ggml-org/llama.cpp/pull/30882), which
+superseded PR30852. Only the vision library was rebuilt; the existing CUDA
+backend and image resizing remain selected. The tracked patch and source/hash
+provenance are recorded in `artifacts.lock.json`.
+
+A noncausal image must fit in one physical batch. Batch1280 retains the full
+1120 budget and avoids the silent clamp that batch1024 would impose. Compared
+with batch2048, it saved **668 MiB on each model GPU**, 1336 MiB total, in repeated
+serving snapshots. Relative to the former 512/batch1024 profile, the new
+higher-detail profile costs approximately **220 MiB more per GPU**. These are
+serving allocations, not peak or minimum requirements. The memory estimator
+now uses the same physical batch as the launcher.
+
+### What the measurements support
+
+The final control and two candidate runs produced **24/24 correct requested
+synthetic scene answers**, with identical complete visual answers across all
+three runs. They preserve elimination attribution, score changes, newest death
+versus historical death/respawn, no-event handling, and a new visual request
+arriving during two text streams.
+
+| Measurement | Full-budget control, batch2048 | Selected batch1280 | Selected repeat |
+| --- | ---: | ---: | ---: |
+| Complete fresh elimination fact during two text streams | 954 ms | 948 ms | 953 ms |
+| Complete newest-DEAD correction | 935 ms | 926 ms | 935 ms |
+| Initial player identity and current ALIVE | 455 ms | 454 ms | 456 ms |
+| Text throughput | 177.75 tok/s | 177.44 tok/s | 182.77 tok/s |
+| CPU-attached model GPU serving allocation | 12,678 MiB | 12,010 MiB | 12,010 MiB |
+| Second model GPU serving allocation | 11,388 MiB | 10,720 MiB | 10,720 MiB |
+
+The allocation reduction is repeatable. These timings do **not** demonstrate a
+consistent decode-speed gain. The lab used the same quiet CPU allocation for
+all candidates; production retains its separate serving allocation. Client close
+and observed idle processing slots are distinct from acoustic interruption or
+native full-duplex input to one generation.
+
+Higher resolution is not proof of more accurate answers. On one existing dense
+UI screenshot, the 1120 profiles correctly read one timing, abstained on another,
+and read `679` as `879`. The earlier 512 profile read that last number correctly.
+The synthetic scenes use large labels and stay below both image limits; they
+cannot establish dense gameplay/OCR quality. The selected policy preserves
+available image detail, while retaining this explicit limitation.
+
+### Options investigated and left out
+
+- Explicit CPU thread counts and optional CUDA graph optimization produced no
+  useful gain beyond the unchanged control's variation. Defaults remain.
+- MTP3 was slower; MTP1 had mixed throughput, completeness and useful-fact latency.
+  The established depth2 remains selected.
+- The upstream [MMA attention proposal for 72-dimensional vision heads](https://github.com/ggml-org/llama.cpp/pull/30285)
+  passed all 52 selected existing CPU-reference checks on Ada. Its representative
+  attention operation improved from18.38 to3.73 ms, and matched visual first
+  output from about803 to668 ms. However, every measured MMA variant omitted
+  the expressly requested elimination event in two scene answers. Faster valid
+  fragments do not establish preserved answer completeness, so it remains a lab
+  candidate. Its dense OCR improved in one512 profile, which does not erase the
+  missing scene facts.
+- Merged [Gemma image-resize parity fix PR30922](https://github.com/ggml-org/llama.cpp/pull/30922)
+  was evaluated separately. Its reference-aligned preprocessing is a valid
+  correctness lead, but the measured MTP2 profile omitted one concurrent event
+  and introduced late useful-state delivery in another case. It is retained for
+  further evaluation, not silently bundled into the accepted activation fix.
+- Both model cards already run the previously validated130 W, +150 graphics,
+  +2750 memory profile. Higher memory offsets previously produced silent wrong
+  outputs. GPU placement, hybrid all-reduce, prefix reuse, full offload, Flash
+  Attention, state-copy tuning and checkpoint spacing were checked against
+  prior measurements. Rejected display-sharing and forced-P2P configurations
+  were not reintroduced.
+
+The runtime keeps a complete prior generation for rollback. Experimental source,
+receipts, complete answers and independent reviews remain in the local lab;
+private prompts, installation state and integration code are not published.
+
 ## Follow-up: image budgets and the TensorRT correctness fix
 
 The 2026-11-04 UTC follow-up reused the same bounded synthetic workload. Two

@@ -18,7 +18,9 @@ PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # a per-word BPE token cache and two template renders instead of three (request handling ~80 -> ~40 ms),
 # reuse of identical checkpoints and parallel state copies; outputs identical to tp8, decode unchanged.
 # Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp8-20261019
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-20261019
+# 2026-11-04: upstream #30882 corrects Gemma 4 vision GELU; CUDA and resize paths unchanged.
+# Rollback: /var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-20261019 (restore the paired image/batch settings below).
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-gelu-20261104
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64
@@ -84,13 +86,15 @@ fi
 # Context checkpoints copy each GPU's share of the SWA state on 4 threads (tp9): ~10 ms less per
 # 200 MiB checkpoint on the two-card split. (LLAMA_SWA_SLACK, a larger SWA ring, was measured and
 # rejected: no checkpoint restores, but decode 14-16% slower.)
+# Preserve the highest supported Gemma 4 image budget. One non-causal image must fit
+# in a physical batch; 1280 retains 1120 tokens with 668 MiB/card less workspace than 2048.
 exec env CUDA_DEVICE_ORDER=PCI_BUS_ID LLAMA_STATE_THREADS=4 \
   CUDA_VISIBLE_DEVICES="$GPU_UUIDS" \
   LD_LIBRARY_PATH="$LLAMA/lib:$LD_LIBRARY_PATH" \
   "$LLAMA/bin/llama-server" \
   -m "$MODEL" --alias obsidience-gemma \
-  --mmproj "$MMPROJ" --mmproj-offload --image-max-tokens 512 \
+  --mmproj "$MMPROJ" --mmproj-offload --image-max-tokens 1120 \
   --host 127.0.0.1 --port 8089 -ngl 99 -c "$((CTX * PARALLEL))" --parallel "$PARALLEL" \
-  --batch-size 4096 --ubatch-size 1024 --flash-attn on \
+  --batch-size 4096 --ubatch-size 1280 --flash-attn on \
   --checkpoint-min-step 1024 --cache-ram 16384 --no-reasoning-preserve \
   --jinja "$@"

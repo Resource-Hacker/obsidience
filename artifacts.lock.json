@@ -1082,6 +1082,21 @@
         "obsidience/shell/session/game-mode",
         "obsidience/shell/systemd/obsidience-game-mode-profile.service"
       ]
+    },
+    "llama_cpp_executive_tp9_gelu": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "1167d3f42c2b4dc5469bf4e696cb8c678ca79110",
+      "version": "b11509+obsidience-exact-input-admission+gemma4-tool-argument-grammar+tp9+gemma4-vision-gelu",
+      "license": "MIT",
+      "path": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-gelu-20261104",
+      "manifest": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-gelu-20261104/MANIFEST.json",
+      "launcher": "obsidience/scripts/llm.sh",
+      "base_artifact": "llama_cpp_executive_tp9",
+      "patch": "obsidience/scripts/patches/llama-cpp-gemma4-vision-activation-b11509.patch",
+      "patch_sha256": "14a334971310bb488c106399a1243164ba082f9cfa168a747fd1531f759d798e",
+      "upstream_fix": "https://github.com/ggml-org/llama.cpp/pull/30882",
+      "upstream_fix_revision": "5ba3b9fd3da34e516450ea58c229949ea4cff3ce",
+      "integration": "Two-line upstream runtime correction for keyless Gemma 4 projectors: tanh GELU instead of QuickGELU. Only libmtmd rebuilt; server, CUDA backend, model weights and image resizing unchanged. Image budget1120, physical batch1280; same MTP2, F16 KV and per-lane context. Experimental MMA72 and PAD_NONE changes remain unselected after incomplete scene answers. Rollback: prior tp9 prefix and paired launcher/estimator settings."
     }
   }
 }
