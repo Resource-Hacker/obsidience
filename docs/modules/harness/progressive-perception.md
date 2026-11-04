@@ -190,7 +190,111 @@ a native Tool-call interface. Missing measurements remain open questions, and
 ordinary configuration or integration defects should be investigated before
 dismissing an approach.
 
+## Follow-up: image budgets and the TensorRT correctness fix
+
+The 2026-11-04 UTC follow-up reused the same bounded synthetic workload. Two
+llama.cpp profiles changed only the maximum image-token budget, from 512 to 140
+or 70. A TensorRT profile changed only Marlin's gate/up projection order. All
+three remained isolated experiments; the production engine and configuration
+were restored unchanged afterward.
+
+| Measurement | Original llama.cpp | llama.cpp, image cap 140 | llama.cpp, image cap 70 | Corrected TensorRT | Existing vLLM MTP2 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Complete newest-DEAD correction | 943.9 ms | 675.8 ms | 574.2 ms | 511.7 ms | 357.0 ms |
+| Useful fresh fact during two text streams | 949.2 ms | 715.4 ms | 539.5 ms | 359.3 ms | 299.7 ms |
+| Correct requested visual answers | 8/8 | 8/8 | 8/8 | 8/8 | 8/8 |
+| End-to-end short-text completion rate | 183.2 tokens/s | 175.0 tokens/s | 176.2 tokens/s | 76.9 tokens/s | 128.7 tokens/s |
+| Repeated-prefix first output | 18.8 ms | 20.4 ms | 22.0 ms | 976.9 ms | 50.0 ms |
+
+Useful-fact timing measures completion of a meaningful requested proposition,
+not the first token or the whole response. Natural answers order facts
+differently: the new llama profiles complete the score-change fact before the
+elimination attribution. The separate newest-DEAD row compares the same explicit
+current-state claim. The eight answers reuse five synthetic cases; this is not
+eight independent gameplay trials or a latency distribution.
+
+Image-budget tuning materially reduces llama.cpp latency, but does not establish
+a universal 900-to-300 ms improvement. At cap 70, a useful no-event fact arrived
+in 290.8 ms and one-picture identity/current-state information in 228.3 ms;
+the harder correction and concurrent-update cases still took 539–574 ms. The
+smallest budget omitted the killer's identity in two otherwise correct answers.
+Dense game UI and small text remain unvalidated, so these results do not justify
+a global quality reduction. Source inspection also predicts that changing only
+512 to 280 would leave these particular pictures unchanged: their aligned shape
+already uses about 260 image tokens.
+
+The original llama correction spent 771 ms in the native prompt interval before
+its first output at 820 ms. That interval includes vision work and decoder
+prefill; it is not an encoder-only measurement. Earlier upstream improvements to
+[per-image scheduler reservation](https://github.com/ggml-org/llama.cpp/pull/28751)
+are already in the evaluated native source. The proposed
+[text-only prompt-cache reuse change](https://github.com/ggml-org/llama.cpp/pull/31621)
+does not remove changed-image encoding. Neither can be counted as a new measured
+900-to-300 ms gain here.
+
+### TensorRT failure: wrong projection order
+
+[NVIDIA issue 20965](https://github.com/NVIDIA/TensorRT-LLM/issues/20965) and
+[PR 20966](https://github.com/NVIDIA/TensorRT-LLM/pull/20966) identify a defect in
+the exact pinned Marlin path. The inherited loader packs the expert's first
+projection as `[up; gate]`, while the activation interpreted it as `[gate; up]`.
+Gemma therefore computed `GELU(up) * gate` instead of `GELU(gate) * up`.
+
+The lab applied only the two-slice correction. The previously repeated nonsense
+disappeared, all eight requested visual answers became correct, and every visual
+answer finished normally. The source contradiction and one-variable result
+identify this as a principal cause of the observed degeneration. CUDA-graph
+disabling and the earlier tanh-only overlay had left the projection error intact.
+The upstream PR was still open and unmerged when checked; no general TensorRT
+upgrade or production patch was installed.
+
+Corrected TensorRT remains a candidate. This configuration still has no measured
+long-prefix reuse, about 77 tokens/s text throughput, and unqualified native
+cancellation drain: its gauge could not establish a fresh idle baseline. A client
+stream closing is not a drain receipt. Its configured allocation was about
+17.2 GiB per model GPU, before production speech coexistence; cache sizing and
+long conversations require their own comparison.
+
+### Upstream streaming work and remaining integration
+
+vLLM has a merged
+[native resumable streaming-input interface](https://github.com/vllm-project/vllm/pull/28973).
+It accepts incremental inputs through one session and retains prior KV state.
+Inputs arriving during generation are queued for subsequent chunks; this does
+not establish immediate modification of an arbitrary running answer. The lab
+comparison above uses ordinary independent HTTP requests, not that interface.
+
+The evaluated vLLM 0.32 build lacks the later
+[chunk-boundary collector fix](https://github.com/vllm-project/vllm/pull/58941)
+and [terminal abort/session-resurrection fix](https://github.com/vllm-project/vllm/pull/58942),
+despite those changes being merged upstream. Exact source/ancestry checks matter
+more than release dates. Its proposed
+[bounded streaming-session retention](https://github.com/vllm-project/vllm/pull/53876)
+is unmerged draft work that admits a single KV group; Gemma's hybrid attention
+requires additional integration. The
+[realtime video frontend](https://github.com/vllm-project/vllm/pull/39642) is also
+unmerged. Qwen/H100 demonstrations do not establish Gemma/Ada acceptance.
+
+Hardware decode alone is insufficient for GPU-resident model input: the evaluated
+[PyNvVideoCodec loader](https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/multimodal/video_decoders/pynvvideocodec.py)
+and DeepStream loader copy decoded frames back to host memory. TorchCodec can
+retain device frames, but the pinned GPU processor configuration is restricted
+to an encode-only deployment. A direct device-frame adapter must preserve the
+paired preprocessing/encoder, frame identity and synchronization, and measure
+cross-device transfer and contention.
+
+The next useful comparison combines real saved visual evidence with a warm Agent
+prefix and concurrent speech resource use. It should distinguish newly encoded
+frames from repeated-image cache hits and measure obsolete-output suppression,
+corrected useful statements and request-scoped abort. Current evidence supports
+retaining llama.cpp as the production control, pursuing its vision efficiency,
+and evaluating corrected TensorRT and vLLM without assuming either is a universal
+replacement. No full-duplex or zero-copy acceptance follows from these trials.
+
 ## Matched backend comparison
+
+The following table records the original profiles, before the correction and
+image-budget follow-up above.
 
 The 2026-11-03 laboratory comparison uses the same prompts, labelled synthetic
 pictures, temperature-zero sampling and 256-token output budget on the same two
