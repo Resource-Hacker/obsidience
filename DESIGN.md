@@ -345,10 +345,19 @@ neighbours); (9) history projected from the native conversation (no conversation
   finite stages, source identity, timestamps, modalities and cleanup. Only the
   controller may continue its original Tool/arguments with an exact native call
   ID; ordinary model calls cannot borrow the continuation or widen authority.
-- The first adopter is voice `computer.replay` with early speech enabled. A
+- Voice `computer.replay` uses the sequence with early speech enabled. A
   saved endpoint precedes background keyframe preparation, then a mosaic and
   selected chronological frames. Static sampled scenes omit the detail stage.
   Text and Task calls return one completed result.
+- Regional `computer.observe` can also return its original image immediately
+  while a warm CPU text sensor reads the selected native region. Its optional
+  continuation carries the same frozen pixels and reading, without renewing
+  the input lease. Both adapters accept native regions; replay derives them
+  from its saved clip before overview downscaling and reads only its endpoint.
+  Explicit line mode bypasses text detection for a deliberately selected row.
+  OCR is untrusted, partial when bounded work omits candidates, and never an
+  input gate. Raw OCR and region metadata use ephemeral attachments consumed
+  at the next model boundary, not persisted Tool results or trace text.
 - New evidence enters between model generations, while existing TTS may keep
   playing. Later statements add or explicitly correct; SKIP and exact repeated
   sentences are filtered consistently for speech and final text. Semantic
@@ -426,6 +435,12 @@ neighbours); (9) history projected from the native conversation (no conversation
   acknowledged revisions (an unrelated Surface revision rebinds only if every other target
   field is unchanged); at most one read-only recapture on `stale_scene`. No geometry
   tolerance, fixed delay or polling.
+- Optional regional crops supplement that original image; they do not replace
+  its coordinate basis. A region requests bounded CPU OCR unless `read:false`;
+  `read_mode:line` is for one complete text row, otherwise detection runs within
+  the region. One Harness-owned warm reader stays idle without requests, uses
+  local verified artifacts, declines concurrent work instead of queuing it, and
+  drains native work on cancellation. No extra capture or GPU owner is created.
 - `computer.act`: one point (0–999 grid of the preceding image) bound privately to that
   image and a one-use lease; any intervening Tool, invalid response, completion or
   cancellation discards it. The window adapter validates process start time, identity,

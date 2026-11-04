@@ -35,6 +35,7 @@ LATENCY_STAGES = frozenset({
     "speech_prefill_started", "speech_prefill_completed", "speech_prefill_cancelled",
 })
 _PRIVATE_KEYS = {
+    "region",
     "point", "image", "image_url", "image_png", "pixels", "capture", "capture_token",
     "observation_lease", "scene_lease", "reasoning", "reasoning_content", "chain_of_thought", "analysis",
 }

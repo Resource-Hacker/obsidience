@@ -63,6 +63,14 @@ Patches to third-party projects
   derived from Arch Linux package sources, which Arch Linux licenses under
   0BSD.
 
+PaddleOCR
+  https://github.com/PaddlePaddle/PaddleOCR
+  Copyright (c) PaddlePaddle Authors. Apache License, Version 2.0.
+  DB preprocessing, polygon expansion, perspective rectification and CTC
+  decoding adapted in obsidience/harness/computer/ocr.py. Runtime ownership,
+  CPU ONNX execution and bounded evidence handling are local adaptations.
+  License: LICENSES/PaddleOCR-Apache-2.0.txt
+
 Documentation media
   The speech in docs/media/voice-demo.mp4 was synthesized with Pocket TTS's
   "alba" voice (Alba MacKenna, https://huggingface.co/kyutai/tts-voices),

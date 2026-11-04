@@ -1096,7 +1096,58 @@
       "patch_sha256": "14a334971310bb488c106399a1243164ba082f9cfa168a747fd1531f759d798e",
       "upstream_fix": "https://github.com/ggml-org/llama.cpp/pull/30882",
       "upstream_fix_revision": "5ba3b9fd3da34e516450ea58c229949ea4cff3ce",
-      "integration": "Two-line upstream runtime correction for keyless Gemma 4 projectors: tanh GELU instead of QuickGELU. Only libmtmd rebuilt; server, CUDA backend, model weights and image resizing unchanged. Image budget1120, physical batch1280; same MTP2, F16 KV and per-lane context. Experimental MMA72 and PAD_NONE changes remain unselected after incomplete scene answers. Rollback: prior tp9 prefix and paired launcher/estimator settings."
+      "integration": "Previous selected runtime retained for rollback: two-line upstream Gemma 4 vision GELU correction. The vision profile below adds reference resizing and MMA72 without changing weights, precision or image budget."
+    },
+    "llama_cpp_executive_tp9_vision": {
+      "repository": "https://github.com/ggml-org/llama.cpp",
+      "revision": "40b54c625ad6111bdeb9122fe5344217b9bc083e",
+      "license": "MIT",
+      "base_artifact": "llama_cpp_executive_tp9_gelu",
+      "path": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-vision-20261104",
+      "manifest": "/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-vision-20261104/MANIFEST.json",
+      "launcher": "obsidience/scripts/llm.sh",
+      "patches": [
+        {
+          "path": "obsidience/scripts/patches/llama-cpp-vision-mma72-b11509.patch",
+          "sha256": "b2cb7a767a5af73728b7b2bbc726c76682ba3403f3cb1abbd7c76bb66cae3ff7",
+          "upstream": "https://github.com/ggml-org/llama.cpp/pull/30285",
+          "revision": "0a77114b62927a44f8ff4e3140575407ba79c212",
+          "status": "unmerged at adoption"
+        },
+        {
+          "path": "obsidience/scripts/patches/llama-cpp-gemma4-reference-resize-b11509.patch",
+          "sha256": "80616cba9267d535dbf21ef66291a0f2156c366a06322d8233d3d26e1086d1af",
+          "upstream": "https://github.com/ggml-org/llama.cpp/pull/30922",
+          "revision": "7bd18083082126c08d375cefaa6a5aa1c170ecde"
+        }
+      ],
+      "integration": "Padded internal MMA72 attention with unchanged external head geometry, and Gemma 4 PAD_NONE reference resizing. GELU fix retained. Same GGUF/projector/MTP weights, MTP2, F16 KV, per-lane context, 1120 image token budget and physical batch1280. Only libggml-cuda and libmtmd differ from the previous runtime; rollback selects the GELU-only prefix."
+    },
+    "ppocr_v6_cpu": {
+      "repository": "https://github.com/PaddlePaddle/PaddleOCR",
+      "license": "Apache-2.0",
+      "adapter": "obsidience/harness/computer/ocr.py",
+      "source": "Narrow DB preprocessing, polygon expansion, perspective crop and CTC decoding adapted from the previously recorded PaddleOCR adapter. CPU ONNX Runtime only; no legacy runtime/service imported.",
+      "models": [
+        {
+          "repository": "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx",
+          "revision": "28fe5895c24fd108c19eb3e8479f4ab385fbfc62",
+          "sha256": "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e"
+        },
+        {
+          "repository": "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx",
+          "revision": "b8f84f0b80c529de40b4fbb3544b84fa7233a513",
+          "sha256": "5435fd747c9e0efe15a96d0b378d5bd157e9492ed8fd80edf08f30d02fa24634"
+        }
+      ],
+      "integration": "Optional warm CPU detector/recognizer, local hash-verified weights, two nonspinning ORT threads. Source-native regional reading inside the existing observation lifecycle; no capture loop, GPU work, runtime download or input authority. Ephemeral text, explicit partial coverage and cancellation drain."
+    },
+    "pyclipper": {
+      "repository": "https://github.com/fonttools/pyclipper",
+      "version": "1.4.0",
+      "license": "MIT; bundled Clipper Boost-1.0",
+      "wheel_sha256": "773c0e06b683214dcfc6711be230c83b03cddebe8a57eae053d4603dd63582f9",
+      "integration": "Native polygon expansion for Paddle DB OCR postprocessing, CPython3.14 manylinux wheel."
     }
   }
 }

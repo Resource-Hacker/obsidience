@@ -69,6 +69,9 @@ class CallOutcome:
     image_png: bytes | None = None
     # Labelled PNG frames in order (a screen replay); same privacy as image_png.
     frames: tuple[tuple[str, bytes], ...] = ()
+    # Supplemental regions and OCR are ephemeral, like the source pixels.
+    regional_frames: tuple[tuple[str, bytes], ...] = ()
+    text_evidence: tuple[str, ...] = ()
 
 
 @dataclass
@@ -192,7 +195,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         ex.ctx.pop("_reflex_command_result", None)
     from .optimization.incidents import snapshot, record as record_decision
     decision_sample = snapshot(ex, name, args)
-    public_args = {key: value for key, value in args.items() if key != "point"}
+    public_args = {key: value for key, value in args.items() if key not in {"point", "region"}}
     call_fields = {"step": ex.step + 1}
     if ex.ctx.get("run_id"):
         call_fields["call_id"] = f"{ex.ctx['run_id']}:{ex.step + 1}"
@@ -349,6 +352,8 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
     ex.response_completion_observation = None
     private_image_png: bytes | None = None
     private_frames: tuple[tuple[str, bytes], ...] = ()
+    regional_frames: tuple[tuple[str, bytes], ...] = ()
+    text_evidence: tuple[str, ...] = ()
     private_observation_lease = None
     result_object: dict | None = None
     call_status = "rejected"
@@ -397,6 +402,9 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             # closes its owning Shell socket if STOP arrives in flight.
             capability_cancel = threading.Event()
             ex.ctx["_capability_cancel_event"] = capability_cancel
+            if name in {"computer.observe", "computer.replay"}:
+                from ..computer import reading
+                ex.ctx["_regional_ocr_owner"] = reading.reader()
             if name == "computer.act" and ex.response_observation_lease is not None:
                 ex.ctx[OBSERVATION_CONTEXT_FIELD] = ex.response_observation_lease
             begin_receipt()
@@ -407,6 +415,30 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                 result = dict(result)
                 private_observation_lease = result.pop(PRIVATE_OBSERVATION_FIELD, None)
                 private_value = result.pop(PRIVATE_IMAGE_FIELD, None)
+                # Extract before receipts, JSON conversion or activity publication.
+                regions = result.pop("_private_regional_evidence", [])
+                readings = result.pop("_private_text_evidence", [])
+                if not isinstance(regions, list) or len(regions) > MAX_PRIVATE_FRAMES:
+                    raise ValueError("Invalid regional evidence")
+                regional = []
+                for region in regions:
+                    raw = region.get("image_png") if isinstance(region, dict) else None
+                    if (not isinstance(raw, bytes) or not raw.startswith(b"\x89PNG\r\n\x1a\n")
+                            or len(raw) > 64 * 1024 * 1024
+                            or not isinstance(region.get("source"), dict)):
+                        raise ValueError("Invalid regional image")
+                    label = json.dumps({"label": region.get("label", "Source-native region"),
+                                        "source": region["source"], "action_authorized": False})
+                    if len(label) > 4096:
+                        raise ValueError("Regional source metadata exceeds limit")
+                    regional.append((label, raw))
+                regional_frames = tuple(regional)
+                if (not isinstance(readings, list) or len(readings) > MAX_PRIVATE_FRAMES
+                        or not all(isinstance(row, dict) for row in readings)):
+                    raise ValueError("Invalid text evidence")
+                text_evidence = tuple(json.dumps(row, ensure_ascii=False, allow_nan=False) for row in readings)
+                if sum(len(row) for row in text_evidence) > 24_000:
+                    raise ValueError("Text evidence exceeds limit")
                 if private_value is not None:
                     if isinstance(private_value, bytes):
                         private_image_png = private_value
@@ -415,6 +447,8 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                             and isinstance(frame[1], bytes) for frame in private_value)):
                         private_frames = tuple(private_value)
                     else:
+                        regional_frames, text_evidence = (), ()
+                        private_observation_lease = None
                         result = {
                             "observation": {
                                 "status": "unavailable",
@@ -427,6 +461,8 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
                             }
                         }
                 private_value = None
+                if len(private_frames) + len(regional_frames) + bool(private_image_png) > MAX_PRIVATE_FRAMES:
+                    raise ValueError("Visual evidence exceeds frame limit")
             finish_receipt("returned", result)
             if isinstance(result, dict):
                 result_object = result
@@ -471,6 +507,9 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             emit_tool_result(f"{name} interrupted", INTERRUPTED, "interrupted")
             raise
         except Exception as exc:  # noqa: BLE001
+            private_image_png, private_frames = None, ()
+            regional_frames, text_evidence = (), ()
+            private_observation_lease = None
             # Failed receipt persistence must end the activation. It
             # cannot be converted into a model-retryable Tool error.
             if ex.ctx.get("_receipt_covered") and (not receipt_started or not receipt_finished):
@@ -480,6 +519,7 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
             observation = f"Tool error: {exc}"
             call_status = "error"
         finally:
+            ex.ctx.pop("_regional_ocr_owner", None)
             ex.ctx.pop(OBSERVATION_CONTEXT_FIELD, None)
             ex.ctx.pop("_nested_capability", None)
     ex.response_observation_lease = None
@@ -599,4 +639,4 @@ async def run_capability(ex, name: str, args: dict, *, execute, execute_async, s
         ex.done = True
         return CallOutcome("waiting", observation)
     foreground_checkpoint(ex.interruption_event, ex.ctx)
-    return CallOutcome("returned", observation, private_image_png, private_frames)
+    return CallOutcome("returned", observation, private_image_png, private_frames, regional_frames, text_evidence)

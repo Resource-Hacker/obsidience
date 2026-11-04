@@ -8,6 +8,8 @@ numpy>=1.26
 opencv-python-headless==4.13.0.92
 # CPU person detector loaded by the camera tracking worker.
 onnxruntime==1.29.0
+# Native polygon expansion for the optional CPU OCR sensor.
+pyclipper==1.4.0
 croniter>=3
 ddgs==9.15.0
 python-multipart>=0.0.9

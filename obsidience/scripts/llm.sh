@@ -18,9 +18,10 @@ PRODUCT_ROOT=$(dirname -- "$SCRIPT_DIR")
 # a per-word BPE token cache and two template renders instead of three (request handling ~80 -> ~40 ms),
 # reuse of identical checkpoints and parallel state copies; outputs identical to tp8, decode unchanged.
 # Rollback: LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp8-20261019
-# 2026-11-04: upstream #30882 corrects Gemma 4 vision GELU; CUDA and resize paths unchanged.
-# Rollback: /var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-20261019 (restore the paired image/batch settings below).
-LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-gelu-20261104
+# Gemma 4 vision: upstream #30882 GELU, #30922 reference resize, and the pinned
+# #30285 MMA72 attention kernel. Keep full image detail and the existing model profile.
+# Rollback: /var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-gelu-20261104
+LLAMA=/var/lib/ai/opt/llama.cpp-b11509-obsidience-admission-g4grammar-tp9-vision-20261104
 MODEL=${OBSIDIENCE_MODEL:-"$PRODUCT_ROOT/state/models/executive.gguf"}
 LAUNCH="$PRODUCT_ROOT/state/model-launch/obsidience-gemma.json"
 GPU_UUIDS=$(jq -er '.gpu_uuids | join(",")' "$LAUNCH") || exit 64

@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter
 
 from ....config import CONFIG
+from ....computer import reading
 from ....knowledge import review, source
 from ....knowledge.vault import iter_notes
 from ....models import runtime as model_runtime
@@ -57,6 +58,11 @@ def status():
         "source_issues": listings["source_issues"],
         "source_coverage": listings["source_coverage"],
         "speech": devices.speech_runtime(),
+        "visual_reading": {
+            "configured": bool(CONFIG.extras.get("vision_ocr_model_directory")),
+            "ready": reading.reader() is not None,
+            "device": "cpu", "continuous_capture": False,
+        },
         "llm": {
             "base_url": active_specs[0].base_url if len(active_specs) == 1 else None,
             "model": ",".join(spec.id for spec in active_specs) or "none",

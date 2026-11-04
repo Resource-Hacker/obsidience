@@ -51,6 +51,10 @@ async def lifespan(app: FastAPI):
         resources.callback(clear_previews)
         await llm.start_provider_client()
         resources.push_async_callback(llm.close_provider_client)
+        from ...computer import reading
+        # Optional CPU sensor; Tool lifetimes own capture, work and cancellation.
+        resources.push_async_callback(asyncio.to_thread, reading.close)
+        await asyncio.to_thread(reading.start)
         from ...media import service as media_service
         await asyncio.to_thread(media_service.start)
         resources.push_async_callback(asyncio.to_thread, media_service.close)

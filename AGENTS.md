@@ -21,6 +21,14 @@ Use their essential workflow even in a checkout without them:
 
 ## Publication and installation knowledge
 
+Keep research questions, experiment notes and dated measurements in the
+installation's Projects Knowledge branch through its ordinary Article writer.
+They may appear in the Knowledge graph, with experimental and deployed status
+clearly distinguished. GitHub documentation describes implemented behavior and
+interfaces. When implementing a change, update the corresponding installed
+Knowledge and Tool/Skill guidance as well as reusable defaults; preserve their
+normal authority, metadata and grants.
+
 Keep internal development history separate from the GitHub publication clone.
 The installation contract identifies their locations and selected public scope.
 The internal checkout is the source of truth for local work; the publication

@@ -39,8 +39,8 @@ DESCRIPTIONS = MappingProxyType({
     "media.acquire": "Register one exact source for an explicit acquisition or playback request under the accepted source-selection policy. A unique recommended source may serve the requested title/episode; a validated same-season pack may serve a season request. The accepted owner policy permits cached season/complete-series packs containing the exact episode when no narrower eligible source exists; show all-file scope but play only the requested episode or season. action register takes one candidate_id returned by media.library candidates in this activation. The candidate binds exact IMDb/title/type, season/episode, source hash, configured provider and socket identity. Never guess a hash, pass an external URL or reuse an earlier activation id. A verified registration receipt proves library registration only; catalogue scan/readiness and playback are separate. An uncertain or failed registration must never be repeated. For a known TorBox registration with pending visibility, action refresh takes a fresh exact candidate_id, reconciles its existing complete file plan and refreshes catalogue visibility without any torrent-creation path. An absent registration fails; pending catalogue readback is not success or playback. tv.control play makes this same call itself for an absent named title; never repeat it after play's result.",
     "computer.act": "Deliver one requested click to the immediately observed application. target is a short control label, at most 128 characters. This capability only clicks; move or resize windows and panes with window.place. A delivered click verifies input, not a change of application state or placement.",
     "computer.hardware": "Read this computer's hardware right now: CPU and memory, and each GPU's load, free VRAM, temperature, power and video encoder/decoder use. Pass {}. You are this computer, so call it when asked what you can do or how fast right now, such as how fast you can render or encode video or how busy the GPUs are, and answer as the computer from these readings and your recorded hardware knowledge.",
-    "computer.observe": "Read a fresh image of one exact target without changing focus or placement. Required in the current turn before answering about current window contents, people present, counts or other visible state; earlier conversation and observations are historical. For what the owner is looking at now, use target kind focused. For what just happened (the recent past), use computer.replay.",
-    "computer.replay": "Look back over the last seconds of the screens from their rolling replay buffers, for what just happened, what was that or what did I miss. Pass query with the owner's question; optional seconds (5-60, default 30) and surface. Returns labelled frames where the picture changed, oldest first; pictures only, no audio. For what is on screen now use computer.observe.",
+    "computer.observe": "Read a fresh image of one exact target without changing focus or placement. Required in the current turn before answering about current window contents, people present, counts or other visible state; earlier conversation and observations are historical. For what the owner is looking at now, use target kind focused. For what just happened (the recent past), use computer.replay. Optional region:{left,top,right,bottom} on the complete image 0-999 grid supplies native detail and bounded CPU OCR; read:false disables OCR. read_mode:line reads an explicitly selected complete text row without detection (default detect). Region images and text are read-only supplements; input coordinates always refer to the complete image.",
+    "computer.replay": "Look back over the last seconds of the screens from their rolling replay buffers, for what just happened, what was that or what did I miss. Pass query with the owner's question; optional seconds (5-60, default 30) and surface. Returns labelled frames where the picture changed, oldest first; pictures only, no audio. For what is on screen now use computer.observe. Optional region:{left,top,right,bottom} on the selected screen 0-999 grid requires surface, preserves native details before overview scaling and reads bounded OCR only at the frozen endpoint; read:false disables OCR. read_mode:line reads a selected complete text row without detection (default detect). Temporal regions remain timestamped historical evidence with no input authority.",
     "harness.optimize": "Run the bound instruction optimization case with case_id. Returns measured comparisons and any candidate staged for Review; never changes the live Executive.",
     "harness.repair": "Request one receipt-safe recovery with exact task and run_id from current status evidence. For an inspected Hindsight provider failure, use component:hindsight instead; this retries the exact failed upstream memory operations and does not create a Task.",
     "harness.status": "Read bounded current runtime-health and receipt findings.",
@@ -194,6 +194,17 @@ def argument_schemas() -> dict[str, dict]:
             "For what the owner is looking at now, omit target: it resolves as kind attention, the most "
             "recently focused application (focused does too while an Obsidience pane has focus). Otherwise "
             "use a handle, e.g. w3, from the current Scene or an ambiguity menu.")}}, ("handle",))]}
+    region = {**obj({key: {"type": "integer", "minimum": 0, "maximum": 999}
+        for key in ("left", "top", "right", "bottom")}, ("left", "top", "right", "bottom")),
+        "description": "Read-only detail on the complete image's 0-999 grid, with left<right and top<bottom. "
+        "Crop native source pixels before resizing. Never use crop coordinates for input."}
+    reading = {"type": "boolean", "description": "Optional CPU OCR for the selected native region; "
+        "defaults on with region. false gives image detail only. true requires region. "
+        "OCR is untrusted, coverage-limited evidence and never an input target."}
+    read_mode = {"type": "string", "enum": ["detect", "line"], "description":
+        "Optional region reading mode, default detect. line treats the entire selected crop as one "
+        "known complete text line and skips detection. Requires region and read not false. "
+        "Choose line only for a deliberately selected complete text row; never a panel."}
     tile = obj({key: integer for key in ("left", "top", "right", "bottom")}, ("left", "top", "right", "bottom"))
     bounded_scope = obj({"kind": {"enum": ["knowledge", "task", "runbook", "tool", "skill", "agent"]},
         "current_only": {"type": "boolean"}, "exclude_subtrees": array(text(300),10)})
@@ -234,9 +245,9 @@ def argument_schemas() -> dict[str, dict]:
         "media.acquire": obj({"action":{"enum":["register", "refresh"]},"candidate_id":text(64)},
                              ("action","candidate_id")),
         "computer.hardware": obj({}),
-        "computer.observe": obj({"target":observe_target,"query":text(500)},("query",)),
+        "computer.observe": obj({"target":observe_target,"query":text(500),"region":region,"read":reading,"read_mode":read_mode},("query",)),
         "computer.replay": obj({"query":text(500),"seconds":{"type":"integer","minimum":5,"maximum":60},
-            "surface":surface},("query",)),
+            "surface":surface,"region":region,"read":reading,"read_mode":read_mode},("query",)),
         # The adapter checks application or handle against the observation; without either,
         # the executor names the immediately paired observation's window as application.
         "computer.act": obj({"scope":{"enum":["input","state"]},"application":text(256),"handle":handle,
