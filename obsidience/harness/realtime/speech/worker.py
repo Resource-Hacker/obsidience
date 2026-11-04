@@ -22,6 +22,7 @@ import nemo
 import numpy as np
 import pyaudio
 import torch
+from loguru import logger
 
 # NeMo's service package imports optional LLM providers from __init__.py. Load
 # only its speech modules: Obsidience's Task-selected model is the sole LLM.
@@ -1747,6 +1748,115 @@ class SentencePauseFrame(TTSAudioRawFrame):
     """Silence between two sentences of one reply; discarded like its reply's audio."""
 
 
+# Pocket may hold a vowel or drone instead of reaching EOS. Stop a chunk
+# through its native stop event after twice its expected duration, fading the
+# final 20 ms. These bounds were calibrated on saved external-voice synthesis;
+# they remain delivery guards, never evidence that the text was fully spoken.
+TTS_SECS_PER_WORD = 0.3
+TTS_BASE_SECS = 0.6
+TTS_MIN_SECS = 1.2
+TTS_RUNAWAY_FACTOR = 2.0
+_RUNAWAY_FADE_SAMPLES = TTS_SAMPLE_RATE // 50
+
+
+def _tts_expected_secs(text: str) -> float:
+    return max(TTS_MIN_SECS, TTS_SECS_PER_WORD * len(text.split()) + TTS_BASE_SECS)
+
+
+# Detect a sustained voiced sound with a steady level-normalized mel envelope:
+# 16 bands over 100-4000 Hz in 80 ms blocks, ignoring pauses and quiet dips.
+TTS_DRONE_SECS = 2.24
+TTS_DRONE_CHANGE_DB = 3.5
+TTS_DRONE_GATE_DB = 20.0
+TTS_DRONE_FLOOR_DBFS = -70.0
+_DRONE_BLOCK = TTS_SAMPLE_RATE * 2 // 25
+_DRONE_WINDOW = np.hanning(_DRONE_BLOCK // 4).astype(np.float32)
+_DRONE_NFFT = 512
+_DRONE_FLOOR = 10.0 ** (TTS_DRONE_FLOOR_DBFS / 10.0)
+_DRONE_GATE = 10.0 ** (-TTS_DRONE_GATE_DB / 10.0)
+
+
+def _drone_bands() -> np.ndarray:
+    freqs = np.fft.rfftfreq(_DRONE_NFFT, 1.0 / TTS_SAMPLE_RATE)
+    mel = np.linspace(2595 * np.log10(1 + 100 / 700), 2595 * np.log10(1 + 4000 / 700), 17)
+    edges = 700 * (10 ** (mel / 2595) - 1)
+    low, high = edges[:-1, None], edges[1:, None]
+    mid = (low + high) / 2
+    return np.clip(np.minimum((freqs - low) / (mid - low), (high - freqs) / (high - mid)), 0, None).T.astype(np.float32)
+
+
+_DRONE_BANDS = _drone_bands()
+
+
+class DroneGuard:
+    """Streaming held-drone detector for one Pocket chunk (see TTS_DRONE_SECS)."""
+
+    def __init__(self) -> None:
+        self._pending = np.zeros(0, dtype=np.float32)
+        self._envelope: np.ndarray | None = None
+        self._peak = 0.0
+        self._run = 0
+
+    def feed(self, samples: np.ndarray) -> bool:
+        """Consume Pocket samples; True once a steady voiced run reaches TTS_DRONE_SECS."""
+        pending = np.concatenate((self._pending, samples)) if self._pending.size else samples
+        whole = pending.size - pending.size % _DRONE_BLOCK
+        self._pending = pending[whole:].astype(np.float32, copy=True)
+        drone = False
+        for start in range(0, whole, _DRONE_BLOCK):
+            drone = self._block(pending[start:start + _DRONE_BLOCK]) or drone
+        return drone
+
+    def _block(self, block: np.ndarray) -> bool:
+        power = float(np.mean(block * block))
+        self._peak = max(self._peak, power)
+        spectrum = np.abs(np.fft.rfft(block.reshape(4, -1) * _DRONE_WINDOW, _DRONE_NFFT)) ** 2
+        envelope = 10.0 * np.log10(spectrum.mean(axis=0) @ _DRONE_BANDS + 1e-12)
+        envelope -= envelope.mean()
+        previous, self._envelope = self._envelope, envelope
+        steady = (previous is not None and power > max(_DRONE_FLOOR, self._peak * _DRONE_GATE)
+                  and float(np.mean(np.abs(envelope - previous))) < TTS_DRONE_CHANGE_DB)
+        self._run = self._run + 1 if steady else 0
+        return self._run * _DRONE_BLOCK >= TTS_DRONE_SECS * TTS_SAMPLE_RATE
+
+
+def _bounded_tts_samples(stream, text: str, halt: threading.Event, on_cut):
+    """Bound one Pocket chunk while draining its native work after a stop."""
+    bound = round(TTS_RUNAWAY_FACTOR * _tts_expected_secs(text) * TTS_SAMPLE_RATE)
+    produced = 0
+    drone = DroneGuard()
+    for chunk in stream:
+        if halt.is_set():
+            continue  # Draining lets Pocket join its decoder before releasing the lock.
+        samples = chunk.detach().float().cpu().numpy().reshape(-1)
+        kind = "length" if produced + samples.size > bound else "acoustic" if drone.feed(samples) else None
+        if kind is not None:
+            samples = samples[:max(0, min(samples.size, bound - produced))].copy()
+            fade = min(samples.size, _RUNAWAY_FADE_SAMPLES)
+            if fade:
+                samples[samples.size - fade:] *= np.linspace(1.0, 0.0, fade, dtype=np.float32)
+            halt.set()
+            on_cut(kind, produced + samples.size)
+        produced += samples.size
+        if samples.size:
+            yield samples
+
+
+async def _join_tts_worker(worker: threading.Thread) -> None:
+    """Drain native work before propagating cancellation received during cleanup."""
+    join = asyncio.create_task(asyncio.to_thread(worker.join))
+    cancelled = False
+    while not join.done():
+        try:
+            await asyncio.shield(join)
+        except asyncio.CancelledError:
+            cancelled = True
+    join.result()
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+
 class PocketTTSService(TTSService):
     """Pocket TTS as a normal Pipecat streaming TTS service."""
 
@@ -1806,29 +1916,54 @@ class PocketTTSService(TTSService):
         pcm_bytes = 0
 
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue()
+        queue: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue(maxsize=8)
         cancelled = threading.Event()
+        halt = threading.Event()
+        truncated = threading.Event()
+
+        def note_cut(kind: str, samples: int) -> None:
+            truncated.set()
+            logger.warning("speech-speak DRONE kind={} chunk_words={} expected_ms={} cut_ms={}",
+                           kind, len(clean.split()), round(_tts_expected_secs(clean) * 1000),
+                           round(samples * 1000 / TTS_SAMPLE_RATE))
+
+        def put(item) -> bool:
+            future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+            while not cancelled.is_set():
+                try:
+                    future.result(timeout=0.1)
+                    return True
+                except TimeoutError:
+                    continue
+            future.cancel()
+            return False
 
         def synthesize() -> None:
             try:
-                # Pocket's generator is not thread-safe and only joins its
-                # native workers when consumed to completion. Its stop event ends
-                # the latent producer at the next frame (and skips later text
-                # chunks); drain the generator's ordinary decoder join here.
-                with self._synthesis_lock:
+                while not self._synthesis_lock.acquire(timeout=0.1):
                     if cancelled.is_set():
                         return
-                    for chunk in self._model.generate_audio_stream(self._voice_state, clean, stop=cancelled):
-                        if cancelled.is_set():
-                            continue
-                        samples = chunk.detach().float().cpu().numpy().reshape(-1)
-                        loop.call_soon_threadsafe(queue.put_nowait, _speech_pcm(samples))
-            except BaseException as exc:
+                try:
+                    if cancelled.is_set():
+                        return
+                    # Stop cooperatively and drain the generator so Pocket joins
+                    # its decoder before another consumer acquires this model.
+                    stream = self._model.generate_audio_stream(self._voice_state, clean, stop=halt)
+                    for samples in _bounded_tts_samples(stream, clean, halt, note_cut):
+                        if not cancelled.is_set():
+                            put(_speech_pcm(samples))
+                finally:
+                    self._synthesis_lock.release()
+                if truncated.is_set() and not cancelled.is_set():
+                    # A cut is a delivery failure, never a fully spoken reply or
+                    # an invitation to open a question follow-up.
+                    put(RuntimeError("Pocket TTS speech delivery was truncated"))
+            except BaseException:
                 if not cancelled.is_set():
-                    loop.call_soon_threadsafe(queue.put_nowait, exc)
+                    put(RuntimeError("Pocket TTS speech delivery failed"))
             finally:
                 if not cancelled.is_set():
-                    loop.call_soon_threadsafe(queue.put_nowait, None)
+                    put(None)
 
         worker = threading.Thread(target=synthesize, name="pocket-tts", daemon=False)
         worker.start()
@@ -1860,7 +1995,10 @@ class PocketTTSService(TTSService):
                 yield TTSAudioRawFrame(item, TTS_SAMPLE_RATE, 1)
         finally:
             cancelled.set()
-            await asyncio.to_thread(worker.join, 2)
+            halt.set()
+            # Cancellation retains ownership until Pocket's native work drains,
+            # including repeated cancellation while waiting for its join.
+            await _join_tts_worker(worker)
         if pcm_bytes % CHUNK_BYTES:
             yield TTSAudioRawFrame(b"\0" * (-pcm_bytes % CHUNK_BYTES), TTS_SAMPLE_RATE, 1)
         yield TTSStoppedFrame()

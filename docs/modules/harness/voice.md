@@ -146,6 +146,19 @@ In Realtime mode, speech onset over a reply **ducks** it by 15 dB at once and
 1.5 s of quiet without them **resumes** the reply where it was held, with at
 most 4 s of hold (`realtime_barge_in_ducking`).
 
+Short backchannels such as an acknowledgement do not take the floor while a
+reply is playing. In wake mode, an admitted wake address can interrupt the
+reply; unaddressed speech keeps the existing wake policy.
+
+The next spoken request receives bounded context about the reply it interrupted,
+including early speech emitted before the model finished. This context identifies
+chunks whose playback **started**; it is not word-level alignment or proof that
+the whole chunk was heard. An unfinished reply remains explicitly provisional,
+while an accepted reply retains its result and is marked interrupted. The cue
+belongs only to the immediately following request and is cleared on STOP,
+conversation replacement or supersession. It never authorizes repeating an
+effect or turns provisional speech into a verified result.
+
 ## Cues
 
 Cues are installation clips; missing clips are silent.
@@ -168,6 +181,15 @@ installation selects (it must be one the installation has the right to use).
 
 - Synthesis is serialized on the shared model; cancellation stops the native
   producer and drains its cleanup before the model is released.
+- The desktop producer queues at most eight audio chunks, with backpressure
+  instead of unbounded buffering. Waiting for the synthesis lock is cancellable;
+  repeated cancellation cannot detach native work or report a successful finish
+  while that work still owns the model.
+- A shared duration bound and acoustic drone detector stop runaway synthesis
+  through Pocket's cooperative stop mechanism and fade the cut. Desktop cuts
+  are reported as incomplete delivery, so they cannot trigger a success cue or
+  a question follow-up. These are heuristic delivery guards, not a transcript
+  of what the listener heard.
 - A synthesis failure is a delivery error that never erases the reply.
 - `realtime_tts_quantize = true` uses dynamic **int8** weights in Pocket's
   FlowLM: CPU only, less memory, same voice file. It is read at speech worker

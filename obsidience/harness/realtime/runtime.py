@@ -1057,10 +1057,16 @@ class RealtimeSessionManager:
     def _heard_reply(self, event: dict[str, Any]) -> list[str] | None:
         """Chunks of the playing reply whose audio had started at owner barge-in.
 
-        Realtime-mode speech only: a wake-word address starts a new request.
+        An opened or spotted wake address can interrupt the same reply too.
         """
         spoken, heard = self._spoken, event.get("heard_chunks")
-        if (self._mode != "realtime" or spoken is None or not self._playback_run_id
+        binding = self._playback_timing_binding
+        if (self._mode not in {"realtime", "wake"}
+                or (self._mode == "wake" and not (self._wake_open or self._wake_spotted))
+                or binding is None or type(binding[0]) is not int
+                or binding[0] != self.conversation._generation or not binding[2]
+                or binding[3] != self._playback_run_id
+                or spoken is None or not self._playback_run_id
                 or not spoken[0] or spoken[0] != self._playback_id
                 or event.get("playback_id") != spoken[0]
                 or type(heard) is not int or not 0 <= heard <= len(spoken[1])):
@@ -1819,15 +1825,23 @@ class RealtimeSessionManager:
                         if (operation != self._operation or self._process is not process
                                 or self._phase not in READY_PHASES):
                             continue
+                        if (worker_event.get("playback_id")
+                                and worker_event["playback_id"] != self._playback_id):
+                            continue  # A delayed cut of superseded playback.
                         self._trace_speech_boundary(event_type)
-                        # Read before cancellation clears the playback record.
+                        # Bind delivery before cancellation clears playback and the
+                        # active turn. Neither a stale worker nor a Task reply can
+                        # turn unfinished speech into an accepted assistant row.
                         heard, run_id = self._heard_reply(worker_event), self._playback_run_id
+                        binding = self._playback_timing_binding
+                        keep_interruption = False
+                        if heard is not None and binding is not None:
+                            keep_interruption = await self.conversation.note_speech_interruption(
+                                run_id, heard, turn_id=binding[2], generation=binding[0])
                         await self.conversation.cancel(
                             reason="speech.interruption", stop_playback=False,
+                            keep_interruption=keep_interruption,
                         )
-                        if heard is not None:
-                            # Before preparation, which renders the same cue.
-                            await self.conversation.note_speech_interruption(run_id, heard)
                         # Pipecat queues the interruption frames independently
                         # of partial text. Admit the exact pending prefix only
                         # after its own interruption has drained previous work.
