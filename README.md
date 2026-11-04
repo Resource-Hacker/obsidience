@@ -467,6 +467,14 @@ commit style. Questions and show-and-tell go to
 [Discussions](https://github.com/Resource-Hacker/obsidience/discussions); please
 follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Development credits
+
+Obsidience is developed and maintained by
+[Resource-Hacker](https://github.com/Resource-Hacker), with AI-assisted engineering
+from **Claude Code (Anthropic)** and **Codex (OpenAI)**. Their contributions include
+implementation, debugging, architecture review and documentation under the
+maintainer's direction.
+
 ## Security
 
 Report vulnerabilities privately through GitHub's
