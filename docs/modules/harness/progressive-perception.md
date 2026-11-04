@@ -265,14 +265,16 @@ available image detail, while retaining this explicit limitation.
   attention operation improved from18.38 to3.73 ms, and matched visual first
   output from about803 to668 ms. However, every measured MMA variant omitted
   the expressly requested elimination event in two scene answers. Faster valid
-  fragments do not establish preserved answer completeness, so it remains a lab
-  candidate. Its dense OCR improved in one512 profile, which does not erase the
-  missing scene facts.
+  fragments do not establish preserved answer completeness, so it remained a lab
+  candidate. The follow-up below shows that these were two executions of one
+  scene, and separates the omission from a general vision-quality claim.
 - Merged [Gemma image-resize parity fix PR30922](https://github.com/ggml-org/llama.cpp/pull/30922)
   was evaluated separately. Its reference-aligned preprocessing is a valid
   correctness lead, but the measured MTP2 profile omitted one concurrent event
   and introduced late useful-state delivery in another case. It is retained for
   further evaluation, not silently bundled into the accepted activation fix.
+  Its reference-alignment evidence and the limits of that initial comparison
+  are examined below.
 - Both model cards already run the previously validated130 W, +150 graphics,
   +2750 memory profile. Higher memory offsets previously produced silent wrong
   outputs. GPU placement, hybrid all-reduce, prefix reuse, full offload, Flash
@@ -283,6 +285,186 @@ available image detail, while retaining this explicit limitation.
 The runtime keeps a complete prior generation for rollback. Experimental source,
 receipts, complete answers and independent reviews remain in the local lab;
 private prompts, installation state and integration code are not published.
+
+## Vision attention, resizing and OCR follow-up — 2026-11-04
+
+**Status: isolated measurements and a proposed integration, not a new deployed
+vision pipeline.** The selected runtime above remains active. Neither MMA72 nor
+PAD_NONE has been discarded as a general quality regression. No always-on OCR
+scanner or additional GPU model was installed by this investigation.
+
+### The faster attention kernel remains promising
+
+The two earlier MMA omissions used the identical score-transition image pair
+and question, once alone and once during concurrent output. They establish one
+reproducible incomplete answer, not two independent visual failures or a general
+failure rate. Matching runtime libraries confirmed that only the CUDA backend
+differed between the relevant control and MMA profiles.
+
+A direct follow-up reused those images and asked who eliminated whom in the
+bottom event message. Control, MMA, reference-aligned resizing, and the combined
+candidate all returned the same correct attribution and current life state.
+With the original broader question, MMA and the combined candidate still omitted
+the event, while the resize-only profile included it. Recognition is therefore
+available; salience and response selection remain distinct from recognition.
+
+| Same direct-event request, MTP2 | Current kernel | MMA72 | Resize only | MMA72 + resize |
+| --- | ---: | ---: | ---: | ---: |
+| Complete request, milliseconds | 928 | 799 | 936 | 812 |
+| Native prompt processing, milliseconds | 710 | 581 | 716 | 582 |
+| Requested attribution and current state | Correct | Correct | Correct | Correct |
+
+These are single bounded requests on the same isolated two-GPU/CPU allocation,
+with the same weights, 1120 maximum image tokens and physical batch 1280. They
+are not distributions, acoustic timings or live-commentary acceptance. On the
+existing dense screenshot, native prompt processing was 1470 ms for control and
+864 ms for MMA, but both still misread the small 679 value as 879.
+
+A separate control/MMA pair removed the draft model and explicitly selected
+`--spec-type none`. Both then omitted the event from the original broad
+question. This is counterevidence to treating that omission as unique to MMA.
+It does not prove every difference harmless, establish which embeddings are
+closer to the reference, or justify disabling speculation in production.
+At temperature 0 this build accepts a drafted token only when it matches the
+target's sampled token; draft-confidence settings are not relaxed target
+verification. Different execution/batch paths can still change numerical
+results. Speculative response logprobs in this build contain placeholders,
+so their zeros are not confidence measurements.
+
+[PR30285](https://github.com/ggml-org/llama.cpp/pull/30285) remains open. Its
+padding changes internal attention geometry from 72 to 80 while preserving the
+real 72-dimensional input/output and scale. Both old TILE and new MMA use
+half-precision weighted-value accumulation on this hardware, so a claim that
+MMA alone reduces precision is unsupported. An
+[upstream RTX3090Ti comparison](https://github.com/ggml-org/llama.cpp/pull/30285#issuecomment-6430501600)
+reports closer Qwen embeddings with MMA; it is useful contrary evidence,
+not Gemma acceptance on this installation. The appropriate next candidate is
+still the faster kernel with ordinary task-relevant evidence instructions,
+assessed on useful facts and representative scenes rather than one sentence.
+
+### Reference resizing and useful detail
+
+Merged [PR30922](https://github.com/ggml-org/llama.cpp/pull/30922) removes
+letterbox bars when patch-aligned target dimensions differ from the source
+aspect ratio, matching that part of the Hugging Face processor. Its reported
+E2B/FP32 embedding comparison supports reference alignment; it is not a local
+26B accuracy measurement. This change alone does not make the complete
+llama.cpp preprocessing path identical to Hugging Face, including upscaling.
+
+For a 5120×1440 image at the 1120 budget, the selected target is 3024×816,
+or 1071 visual tokens. Original padding fits 2902×816 content and adds 122 black
+columns. Direct resizing uses the entire target, with about 4.2% relative
+horizontal stretching from patch alignment. Conversely, the archived 1920×960
+OCR screenshot is already aligned: both paths copy the same 800-token pixels.
+Its shared OCR mistake supplies no evidence against the resize correction.
+
+Cropping must happen **before a source is reduced**. Current screen replay
+reduces a 5120×1440 endpoint to 1280×360 before attaching it. Neither a higher
+model image cap nor a later crop can recover those discarded glyph pixels.
+The existing saved-window preparation is the right place to retain a bounded
+native-resolution region with the exact same timestamp and snapshot identity.
+
+A manually selected 614×628 Action Trace crop reduced prompt tokens from 857
+to 226 and MMA request time from 1203 ms to 477 ms, while reading 679 correctly;
+the tiny Hindsight duration remained unreadable. The unchanged kernel abstained
+on more fields in that crop. A2× crop cost 733 prompt tokens and remained unable
+to read the tiny duration. Crops therefore offer selective detail and lower
+cost when irrelevant pixels are replaced; adding every crop beside every full
+frame increases cost, and zoom is not a general accuracy guarantee. These
+manual regions are diagnostic evidence, not validated automatic selection.
+
+### OCR belongs in the evidence pipeline, with a tool for targeted reads
+
+The recommended design is a shared warm CPU OCR sensor used automatically for
+eligible regions of an already authorized source frame, with an optional
+targeted Tool backed by the same sensor. Skip work when irrelevant or beyond
+the available resource budget. The Tool is useful for an ambiguous label or a deliberate closer read.
+Making the model request it for every frame adds a decision/Tool round trip and
+makes routine text grounding depend on the model noticing its own omission.
+
+| Placement | Benefit | Cost or limitation |
+| --- | --- | --- |
+| Model-selected OCR Tool only | Explicit targeted reads | Additional model step; useful text may never be requested. |
+| Full OCR blocking every image | Results available before reasoning | Dense-frame work can exceed the VLM's own first-response latency. |
+| Automatic concurrent OCR plus targeted Tool | Early images and bounded text evidence can overlap | Requires source binding, cancellation, region invalidation and later evidence stages. |
+| Post-generation text replacement | None recommended | OCR cannot safely rewrite the meaning of an already generated or spoken answer. |
+
+The proposed flow reuses current owners:
+
+```mermaid
+flowchart LR
+    F["Existing owner: one pinned source frame"] --> I["Prepare overview / image"]
+    F --> R["Select native-resolution regions"]
+    R --> O["Warm CPU OCR: bounded changed regions"]
+    I --> M["Next model inference"]
+    O --> E["Timestamped text, boxes and uncertainty"]
+    E -->|if ready| M
+    E -->|if late| L["Next explicitly supported progressive step"]
+    T["Optional targeted read Tool"] --> R
+```
+
+OCR should finish before the model step that consumes its evidence. It may run
+concurrently with image preparation or an earlier response. Late results would
+enter the next bounded progressive step; the current model API cannot splice
+them into an already decoding request. Today only non-Task voice
+`computer.replay` opts into progression. Other observations, cameras, text and
+Tasks require explicit adapter adoption; OCR does not automatically grant a
+continuation. Never silently rewrite spoken text afterward.
+
+Keep the OCR session loaded but idle when unused. Known HUD or UI text regions
+can be reread cheaply; discover unknown regions when needed and invalidate
+their geometry on source/layout changes. Change checks are useful work-saving
+hints, not proof that tiny critical text stayed unchanged. Source identity,
+native dimensions, crop transform, timestamp, recognizer identity and uncertainty
+must accompany each result. Historical text never becomes current state. Read
+only initially: crop coordinates must not replace the existing action image or
+its one-use input lease. Camera OCR may use only the frame already supplied by
+the authorized camera owner, without additional capture, recording or continuous
+scanning. Screen text is untrusted evidence, never instructions.
+
+### Measured CPU OCR opportunity and its limits
+
+Installed PP-OCRv6-small ONNX artifacts were exercised with explicit CPU-only
+sessions, two inference threads and spinning disabled. No GPU contention or
+new capture owner was introduced. On the same archived screenshot:
+
+| Work | Observed time | Useful result and limitation |
+| --- | ---: | --- |
+| Recognize a known timing-line region | 7.45–8.89 ms | Correct 495.2 ms and 679 ms across three calls; excludes detection/preprocessing. |
+| Recognize a tight 679 region | 2.69–4.01 ms | Correct 679 ms across three calls. |
+| Recognize a tiny Hindsight region | 2.79–3.62 ms | Correct 46.3 number, wrong unit `ns`. |
+| Automatically locate/read Action Trace panel | 869 ms,55 boxes | Correct 679, but wrong 40.3 for 46.3. |
+| Automatically locate/read full 1920×960 image | 1229 ms,66 boxes | Correct 679 and 46.3 ms;16 irrelevant graph-label boxes also produced text. |
+
+The first recognizer session initialized in 35 ms; its probe peaked around 143 MiB
+including the interpreter and image arrays. Recognition used ORT1.29.0;
+automatic detection/recognition used ORT1.24.4 in a separate existing
+environment for its polygon dependency. The latter initialized
+both sessions in 118 ms and peaked around 586 MiB including transient allocations.
+Those peaks are not steady-state memory measurements. Automatic totals are one
+warm pass per scope with sequential recognition, including detection, polygons,
+crops and text decoding. They exclude session construction, source loading,
+capture, model request serialization/inference and speech; they are not an
+optimized latency bound or a controlled runtime-version comparison.
+Confidence and repeated agreement did not make every tiny glyph correct.
+
+This supports **native-region OCR as additional grounding**, not a claim that
+full-frame OCR is universally fast or accurate. The maintained
+[PaddleOCR models](https://github.com/PaddlePaddle/PaddleOCR/blob/main/docs/version3.x/algorithm/PP-OCRv6/PP-OCRv6.en.md)
+and [RapidOCR adapter](https://github.com/RapidAI/RapidOCR) are relevant reuse
+options; exact model/vocabulary/runtime compatibility still needs integration
+validation. [ONNX Runtime thread controls](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)
+support bounded threads and sleeping idle workers.
+
+Generic [COCO-trained YOLO](https://docs.ultralytics.com/datasets/detect/coco/)
+recognizes natural-object classes, not game-specific HP bars, cooldowns or kill
+feeds. A UI-specific detector such as
+[OmniParser](https://github.com/microsoft/OmniParser) is a more relevant candidate
+for finding interactive regions, but its heavier detector/captioner and
+artifact-specific licenses need separate justification. Neither detector should
+become a second input owner or a substitute for actual game-state evidence.
+Start with source-native regions, text detection/recognition and the existing
+scene metadata before adding a general detector to every frame.
 
 ## Follow-up: image budgets and the TensorRT correctness fix
 
