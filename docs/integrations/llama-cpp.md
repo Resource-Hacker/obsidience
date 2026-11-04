@@ -60,12 +60,34 @@ flowchart LR
   them with the target model; outputs are identical to plain decoding.
 - **Slots.** The Harness pins the Executive conversation and background work to their own slot (`id_slot`), so an Audit trial no longer
   evicts the conversation's cached prefix. Idle slots are not copied to host
-  memory, and the warm Executive slot is saved and restored across a server
-  restart instead of a cold prefill.
+  memory. Saved prefixes can restore after a restart with the same launch
+  layout; a different slot count requires a compatible cache or a fresh warmup.
 - **Admission guard.** Each request carries the exact `input_token_limit`; the
   server refuses longer input before queueing and acknowledges the admitted
   count in `X-LLAMA-Input-Token-Limit` and `X-LLAMA-Input-Tokens`. The model
   route fails closed without that acknowledgement.
+
+## Dynamic slot demand
+
+The model owner leases slots to running lanes, keeping the Executive and shared
+background lane available. An optional integration adds demand for its active
+lanes and releases that demand when they stop. Idle reserved slots retain useful
+prompt state; they do not imply active inference. Slot demand therefore follows
+lane lifetime rather than fluctuating on every individual request.
+
+Changing the served count requires a server relaunch. Demand is checked again
+after the announcement and after cache-saving shutdown, so changes that cancel
+each other can avoid a restart and changes during shutdown use one coherent
+replacement layout. Later changes are reconciled by the same model owner.
+Failed or deferred reconciliation remains visible through
+`slot_reconciliation_pending` and `slot_reconciliation_error`; subsequent model
+demand or resource release retries through that owner without a retry loop.
+
+Cache identity includes the model, MTP head, launch profile, launcher and slot
+count. The pinned engine serializes its complete KV stream layout even for a
+single-sequence save. A cache from a different count is incompatible and must
+not be presented as a preserved warm prefix. Model readiness, allocated capacity
+and successful cache restoration are separate observations.
 
 ## Boundary
 

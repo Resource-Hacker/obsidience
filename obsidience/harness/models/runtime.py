@@ -636,17 +636,15 @@ async def _probe(spec: ModelSpec, timeout: float = 0.75) -> bool:
 def _slot_file(spec: ModelSpec, lane: str = EXECUTIVE_LANE) -> str | None:
     """Slot file name for this exact model, MTP head, launch profile and llm.sh.
 
-    The Executive's lane keeps its unsuffixed name; the other saved lanes add ``-<lane>``, so a
-    cache follows its lane to whichever slot it leases. The slot count is left out of the
-    fingerprint: one sequence's state does not depend on it, and a relaunch for a new count
-    restores the caches its stop saved.
+    The Executive's lane keeps its unsuffixed name; the other saved lanes add ``-<lane>``.
+    The native state includes the total stream layout, so slot count is part of the
+    fingerprint. A changed count warms fresh rather than restoring an incompatible cache.
     """
     if spec.id != EXECUTIVE_MODEL:
         return None
     try:
         digest = hashlib.sha256()
         launch = json.loads(_launch_path(spec.id).read_text())
-        launch.pop("max_num_seqs", None)
         digest.update(json.dumps(launch, sort_keys=True).encode())
         digest.update(_HardwareModelRuntime._memory_script(spec).read_bytes())
         for path in (spec.model_path, spec.mtp_path):
@@ -1215,6 +1213,7 @@ class _HardwareModelRuntime:
         self._lanes: dict[str, str | None] = dict.fromkeys(BASE_LANES)
         self._lanes_open = False
         self._lanes_dirty = False
+        self._lanes_error: str | None = None
         self._lane_task: asyncio.Task | None = None
         self.resizing: int | None = None
         self._relaunch_quiet: set[str] = set()  # Background callers already logged this relaunch.
@@ -1745,6 +1744,15 @@ class _HardwareModelRuntime:
 
     @asynccontextmanager
     async def lease(self, spec: ModelSpec, devices: object = None):
+        # A failed lane reconciliation stays pending until real demand gives it
+        # another opportunity; never spin a retry loop after a load failure.
+        if (spec.id == EXECUTIVE_MODEL and self._lanes_open and self._lanes_dirty
+                and spec.id in self._default_target(_read_settings())
+                and (self._lane_task is None or self._lane_task.done())):
+            self._schedule_lanes()
+            await asyncio.shield(self._lane_task)
+            if self._lanes_dirty:
+                raise ModelSlotsResizing(spec, min(len(self._lanes), MAX_SLOTS))
         if self.resizing is not None and spec.id == EXECUTIVE_MODEL:
             raise ModelSlotsResizing(spec, self.resizing)
         # Steady state: the reconciled default model already serves this lease.
@@ -1777,6 +1785,20 @@ class _HardwareModelRuntime:
                 await self._activate_task_model(spec, selected)
             else:
                 activation_attempted = True
+            if spec.id == EXECUTIVE_MODEL and self._lanes_dirty:
+                # An explicitly selected Task may load a deliberately nonresident
+                # model. Publish its deferred lane demand only after activation.
+                healthy = await _probe(spec)
+                wanted = dict(self._lanes)
+                count = min(len(wanted), MAX_SLOTS)
+                if _served_slots(spec) != count or not healthy:
+                    self._schedule_lanes()
+                    raise ModelSlotsResizing(spec, count)
+                LEASES.assign(wanted, count)
+                for lane in LEASES.saved_lanes():
+                    await self._restore_slot(spec, lane)
+                self._lanes_dirty = self._lanes != wanted
+                self._lanes_error = None
             self.running_model = spec.id
             self.switching = False
             yield configured_spec(spec.id)
@@ -1880,11 +1902,23 @@ class _HardwareModelRuntime:
         while self._lanes_dirty:
             self._lanes_dirty = False
             try:
-                await self._apply_lanes()
+                applied = await self._apply_lanes()
+                if not applied:
+                    # Intentional offline/reserved residency keeps demand for
+                    # the next owner event, without a background retry loop.
+                    self._lanes_dirty = True
+                    return
             except asyncio.CancelledError:
+                self._lanes_dirty = True
+                self.reconciliation_pending = True
                 raise
             except Exception as exc:
+                self._lanes_dirty = True
+                self._lanes_error = type(exc).__name__
+                self.reconciliation_pending = True
                 print(f"[models] slot lanes not applied: {exc!r}")
+                return
+            self._lanes_error = None
 
     async def _notify_relaunch(self, phase: str, served: int, count: int) -> None:
         if self._relaunch_notifier is not None:
@@ -1893,58 +1927,93 @@ class _HardwareModelRuntime:
             except Exception as exc:
                 print(f"[models] slot relaunch {phase} notice failed: {exc!r}")
 
-    async def _apply_lanes(self) -> None:
+    async def _apply_lanes(self) -> bool:
         spec = MODELS[EXECUTIVE_MODEL]
-        count = min(len(self._lanes), MAX_SLOTS)
-        served = _served_slots(spec)
-        released = [lane for lane in LEASES.saved_lanes() if lane not in self._lanes]
-        if released and await _probe(spec):
-            # A released lane's warm cache is saved while it still holds its slot.
-            async with self.lock:
-                for lane in released:
-                    with contextlib.suppress(Exception):
-                        await self._save_slot(spec, lane, force=True)
-        if count == served or not await _probe(spec):
-            # Same count (or no running server): the leases change, the engine does not.
-            if count != served:
-                settings = _read_settings()
-                settings["models"][spec.id]["max_num_seqs"] = count
-                _write_settings(settings)
-            LEASES.assign(self._lanes, served if count == served else count)
-            return
-        if len(self._lanes) > MAX_SLOTS:
-            print(f"[models] slot lanes beyond {MAX_SLOTS} run unpinned: {list(self._lanes)[MAX_SLOTS:]}")
-        # Refuse new turns from now; the relaunch waits for the work holding the engine.
-        self.resizing = count
+        self.resizing = min(len(self._lanes), MAX_SLOTS)
         self._relaunch_quiet.clear()
         started = time.monotonic()
+        relaunched = False
         try:
             async with self.lock:
-                count = min(len(self._lanes), MAX_SLOTS)
+                healthy = await _probe(spec)
+                wanted = dict(self._lanes)
+                count = min(len(wanted), MAX_SLOTS)
                 served = _served_slots(spec)
-                if count == served:
-                    # Events while waiting for the engine cancelled each other out.
-                    LEASES.assign(self._lanes, count)
-                    return
+                settings = _read_settings()
+                if spec.id not in self._default_target(settings):
+                    # A reservation or owner selection deliberately keeps this
+                    # model offline. Record demand, but publish no unserved IDs.
+                    self.switching = True
+                    await self._reconcile_defaults()
+                    if await _probe(spec) or (spec.service and await _active(spec.service)):
+                        raise RuntimeError("slot residency did not become offline")
+                    wanted = dict(self._lanes)
+                    settings = _read_settings()
+                    settings["models"][spec.id]["max_num_seqs"] = min(len(wanted), MAX_SLOTS)
+                    _write_settings(settings)
+                    LEASES.assign({}, 0)
+                    return False
+                if healthy and count == served:
+                    released = [lane for lane in LEASES.saved_lanes() if lane not in wanted]
+                    for lane in released:
+                        with contextlib.suppress(Exception):
+                            await self._save_slot(spec, lane, force=True)
+                    # Cache saving can yield to a new demand event too.
+                    if released:
+                        healthy = await _probe(spec)
+                    wanted = dict(self._lanes)
+                    count = min(len(wanted), MAX_SLOTS)
+                    served = _served_slots(spec)
+                    if healthy and count == served:
+                        LEASES.assign(wanted, count)
+                        for lane in LEASES.saved_lanes():
+                            await self._restore_slot(spec, lane)
+                        return True
                 self.resizing = count
-                # After the active turn settles, before the outage.
                 await self._notify_relaunch("before", served, count)
+                healthy = await _probe(spec)
+                wanted = dict(self._lanes)
+                count = min(len(wanted), MAX_SLOTS)
+                if healthy and count == served:
+                    # Demand may return to the served count during the notice.
+                    LEASES.assign(wanted, count)
+                    for lane in LEASES.saved_lanes():
+                        await self._restore_slot(spec, lane)
+                    return True
                 self.switching = True
                 self.residency_generation += 1
-                print(f"[models] slot relaunch: {served} -> {count} slots for {list(self._lanes)}")
+                if healthy or (spec.service and await _active(spec.service)):
+                    await self._stop(spec)  # saves matching-layout caches before stopping
+                # Cache saves and service shutdown yield. Commit latest demand
+                # only after the old engine can no longer consume the new IDs.
+                wanted = dict(self._lanes)
+                count = min(len(wanted), MAX_SLOTS)
+                self.resizing = count
+                print(f"[models] slot relaunch: {served} -> {count} slots for {list(wanted)}")
                 settings = _read_settings()
                 settings["models"][spec.id]["max_num_seqs"] = count
-                await self._stop(spec)  # saves each saved lane's cache under its current lease
                 _write_settings(settings)
-                LEASES.assign(self._lanes, count)
+                LEASES.assign({}, 0)
                 self.reconciliation_pending = True
-                await self._reconcile_defaults()  # starts the new launch and restores the leased caches
+                await self._reconcile_defaults()
+                if not await _probe(spec) or _served_slots(spec) != count:
+                    raise RuntimeError("slot relaunch readiness did not match demand")
+                latest = dict(self._lanes)
+                if latest != wanted:
+                    self._lanes_dirty = True
+                LEASES.assign(latest, count)
+                self._slot_checked = {key for key in self._slot_checked if key[0] != spec.id}
+                for lane in LEASES.saved_lanes():
+                    await self._restore_slot(spec, lane)
                 self.reconciliation_pending = False
+                relaunched = True
                 print(f"[models] slot relaunch done: {count} slots in {time.monotonic() - started:.0f} s")
         finally:
             self.switching = False
             self.resizing = None
-        await self._notify_relaunch("after", served, count)
+        if relaunched:
+            await self._notify_relaunch("after", served, count)
+        return True
 
     async def set_hardware(self, device: object, component: object) -> dict:
         device_id = str(device or "")
@@ -2133,6 +2202,9 @@ class _HardwareModelRuntime:
             },
             "switching": self.switching,
             "reconciliation_pending": self.reconciliation_pending,
+            "slot_reconciliation_pending": (self._lanes_dirty or self.resizing is not None
+                                            or (self._lane_task is not None and not self._lane_task.done())),
+            "slot_reconciliation_error": self._lanes_error,
         }
 
     async def reserve_devices(self, owner: str, devices: tuple[str, ...], *,
@@ -2180,6 +2252,8 @@ class _HardwareModelRuntime:
                     print(f"[models] default residency deferred: {exc}")
             finally:
                 self.switching = False
+        if self._lanes_dirty:
+            self._schedule_lanes()
 
     async def shutdown(self) -> None:
         if self._lane_task is not None:
