@@ -175,7 +175,109 @@ Full duplex would additionally need an explicit protocol for concurrent incoming
 evidence and outgoing responses, rather than assuming ordinary request/response
 generation can accept arbitrary context updates.
 
-## Experimental TensorRT-LLM route
+## How alternatives are evaluated
+
+The objective is a more useful, responsive Agent. Candidate selection measures
+correct facts, current versus historical state, time to a complete useful fact,
+response throughput, repeated-prefix reuse, new evidence arriving during other
+output, interruption and resource cost. Full bounded answers are retained for
+synthetic scenes so a reviewer can assess what the model actually understood.
+
+Wording, Markdown, preambles and opening-token conventions do not determine
+correctness. An omitted incidental detail is distinct from an incorrect answer
+to the question. Formatting matters when it breaks an actual consumer, such as
+a native Tool-call interface. Missing measurements remain open questions, and
+ordinary configuration or integration defects should be investigated before
+dismissing an approach.
+
+## Matched backend comparison
+
+The 2026-11-03 laboratory comparison uses the same prompts, labelled synthetic
+pictures, temperature-zero sampling and 256-token output budget on the same two
+RTX 4000 Ada GPUs. It includes three short-text measurements after warmup,
+three repeated 3,823-token-prefix measurements, four distinct visual scenarios,
+and additional concurrency, correction and cancellation requests. The eight
+measured visual answers cover four temporal scenarios plus one initial-state
+snapshot, reusing evidence in later requests; they are not eight independent
+gameplay tests. No microphone, real stream or acoustic latency is involved.
+
+The baseline uses the installed llama.cpp model configuration: UDmerge Q4_K_XXL,
+paired projector, MTP depth two, three slots and 196,608 total allocated context.
+TensorRT and vLLM use the same NVIDIA NVFP4 weights with BF16 KV and an
+8,192-token context limit. All runs use the same eight logical CPU allocation
+and background scheduling; production llama.cpp normally has a different CPU
+allocation. The baseline retains `--image-max-tokens 512`; vLLM uses HF
+`max_soft_tokens: 280`. Identical input pictures do not establish identical
+encoder work. This compares practical configurations, not identical weight
+precision, preprocessing or the complete production Agent path.
+
+| Measurement | Current llama.cpp settings | TensorRT with CUDA graphs | vLLM 0.32.0, MTP2, one CPU thread per worker |
+| --- | --- | --- | --- |
+| Short text: median first output | 61.2 ms | 82.1 ms | 38.9 ms |
+| Short text: completion rate, including request overhead | 183.2 tokens/s | 77.1 tokens/s | 128.7 tokens/s |
+| Repeated long prefix: median first output | 18.8 ms | 1,008.0 ms | 50.0 ms |
+| Correct requested visual answers | 8/8 | 2/8, plus partial facts in other answers | 8/8 |
+| Complete newest-DEAD statement after changed evidence | 943.9 ms | Not established | 357.0 ms |
+| Complete useful fact from fresh evidence during two text streams | 949.2 ms | Not established | 299.7 ms |
+
+The vLLM comparison also varied the paired speculative assistant and CPU thread
+count. Each profile answered all eight measured visual questions correctly:
+
+| vLLM profile | Median short-text first output | End-to-end text completion rate |
+| --- | --- | --- |
+| No MTP, four CPU threads per worker | 22.8 ms | 101.8 tokens/s |
+| MTP2, four CPU threads per worker | 38.7 ms | 128.4 tokens/s |
+| MTP2, one CPU thread per worker | 38.9 ms | 128.7 tokens/s |
+| MTP4, one CPU thread per worker | 59.9 ms | 117.9 tokens/s |
+
+Two speculative tokens improved text throughput over the no-MTP profile. The
+CPU-thread change made no clear difference to that throughput, and four draft
+tokens cost more than they saved in this workload. Small timing differences
+within these short runs should not be treated as statistically established
+advantages. The MTP2/one-thread process held about 16 GiB per GPU at readiness;
+this is a configured cache allocation, not a measured minimum or peak. The
+baseline process held about 11.5 and 10.3 GiB, despite its larger configured
+context. Coexistence with the production ASR and longer conversations has not
+been measured for the candidates.
+
+TensorRT's graph-enabled run improves on its earlier approximately 31 tokens/s
+configuration. Its visual problems are substantive: repeated text, missing
+requested events and failure to establish the newest life state. An unfinished
+summary was accepted where earlier bullets already established the requested
+facts. The same checkpoint answers correctly in vLLM, which narrows the
+investigation to the TensorRT runtime/configuration path rather than establishing
+that the weights are generally incapable.
+
+llama.cpp reused 3,822 of the 3,823 prefix tokens. vLLM's native metrics also
+recorded prefix-cache hits. TensorRT reported no reused tokens. Both llama.cpp
+and vLLM accepted new evidence while earlier output was still arriving, answered
+the changed state correctly, and showed an active-to-idle transition after client
+cancellation. Idle was observed after about 52 and 57 ms respectively using
+50 ms polling; these are bounded observations, not precise cancellation times
+or acoustic silence measurements. The llama.cpp observer covers processing
+slots; the vLLM observer covers running and waiting requests. TensorRT's gauges
+did not establish a fresh idle baseline, so its backend drain remains unknown.
+
+The new evidence in these comparisons enters a **new independent HTTP request**
+while earlier output continues. That measures concurrent fresh-evidence handling,
+not amendment of the original request, suppression of its older output, or a
+same-activation spoken correction.
+
+vLLM is therefore a concrete candidate for faster visual updates, with a text
+throughput tradeoff in this profile. These results do not establish a universal
+replacement or native full duplex. Long Agent conversations, actual Tool calls,
+changing video, speech integration and resource coexistence still need their
+own measurements.
+
+The follow-up control retained the TensorRT profile and disabled only CUDA
+graphs. Visual degeneration persisted (one fully correct answer out of eight,
+with partial information in others), while text completion fell to 31.73
+tokens/s. A separate Gemma-only laboratory overlay matched the Marlin expert
+GELU approximation to the model configuration; it also failed to resolve the
+visual errors. Neither change was installed in production. These controls narrow
+the investigation without establishing its root cause.
+
+## Initial TensorRT-LLM trial
 
 An isolated evaluation on 2026-11-03 ran TensorRT-LLM
 `1.4.0rc3.dev202610310007` (PyTorch backend, source
@@ -200,13 +302,15 @@ zero and disabled thinking. One text warm-up preceded three measured samples:
 | --- | --- | --- |
 | Warm text first public output | Median 112.55 ms | Short standalone prompt; no live Agent or audio path. |
 | Text completion rate | 31.33 tokens/s, including request overhead | Different model/quantization; no speedup claim against the current runtime. |
-| Three warm image replies | 137.27–687.02 ms to first public output | Replies violated the required color-first format; visual correctness acceptance failed. |
+| Three warm image replies | 137.27–687.02 ms to first public output | Semantic accuracy was not assessed; the original harness checked only the first word, which is not a useful quality criterion. |
 | Three concurrent response streams | All completed; synthetic evidence preparation overlapped generation | Later evidence entered a new request, never an already-generating request. |
 | Cancellation | Unverified backend drain | Native gauges did not establish a fresh idle baseline; that run dispatched no cancellation. |
 
 A preceding cold image request took 29.3 seconds to first public output. The
-image replies began with an analysis preamble instead of the requested label,
-so completion and speed are not evidence of correct perception. An earlier run
+image replies began with an analysis preamble instead of the requested label.
+That is a formatting difference, not evidence that the image was misunderstood.
+The original probe did not preserve enough answer text to judge the visual facts;
+its color-prefix check is retired as a backend-selection criterion. An earlier run
 closed its client stream successfully, but that does not establish that backend
 work drained. The final observer deliberately required idle → active → idle
 before making any cancellation-latency claim; its missing baseline remains a
@@ -215,8 +319,35 @@ failed observation rather than an inferred success.
 This experiment remains outside the deployed Harness. It does not implement
 GPU-frame ingress, zero-copy video, arbitrary mid-generation context updates,
 spoken interruption or native full duplex. Production adoption still requires
-correct image responses, trustworthy cancellation, matched quality and latency
-measurements, and integration with existing evidence and resource ownership.
+a comparison of useful visual facts, freshness, response latency, interruptions,
+resource cost and integration with the existing evidence and execution owners.
+Different wording or Markdown is not a reason to reject a candidate. A missing
+measurement is uncertainty to investigate, not proof that a method is worse.
+
+## Other viable avenues
+
+The investigation is broader than one inference server. Each route addresses a
+different part of the latency budget:
+
+| Avenue | Potential benefit | Next measurement or integration question |
+| --- | --- | --- |
+| Improve the existing llama.cpp route | Preserve fast text decode and established Agent-prefix reuse; tune speculative depth, image budget and repeated image work. | Measure current-state accuracy and complete useful-answer latency while varying one parameter. Native RGB ingress could remove PNG/base64 overhead if that cost is material. |
+| TensorRT graphs, MTP and matching vision-encoder optimizations | Faster decoder dispatch, speculative decoding and less repeated image encoding. | Resolve the observed semantic defect, then compare encoder graphs versus side-stream preparation. Gemma4 prefix reuse is currently marked unsupported; assess short-context perception separately from long Agent turns. |
+| vLLM with hybrid prefix caching and MTP | Faster first output, useful visual updates and maintained speculative decoding. | Compare paired-assistant depths and actual Tool/conversation workloads. Verify image/video and shared-KV behavior on the exact local GPUs. |
+| SGLang with Gemma4 NEXTN and hybrid sliding-window cache | Another maintained speculative and prefix-reuse implementation. | Verify a compatible quantized checkpoint/kernel combination on Ada before benchmarking; the unquantized BF16 model does not fit the two-card memory budget. |
+| NVDEC → PyNvVideoCodec → DLPack → matching GPU preprocessing | Avoid the decode-to-host-to-GPU round trip. | Include GOP/seeking, resize/normalization, device synchronization and any cross-GPU transfer in end-to-end useful-answer timing. DLPack shares a buffer; later transforms can still allocate device memory. |
+| DeepStream/Triton or a dedicated matching vision encoder | Reuse maintained video batching, preprocessing and tensor transport for ongoing streams. | Preserve Gemma4's exact vision tower, positions, masks and embedding semantics. A generic detector or unrelated image encoder is not interchangeable. |
+| Evidence scheduling and interruption | Respond to new facts sooner without waiting for a complete old answer. | Compare latest-evidence scheduling and token-boundary continuation against the current between-step contract; measure stale statements and correction delay. |
+
+These avenues remain eligible on measured usefulness. They are not all
+implemented or benchmarked. The
+[TensorRT support matrix](https://github.com/NVIDIA/TensorRT-LLM/blob/04de854a9e50d920633ff0870d914263c6ba4ae7/docs/source/models/supported-models.md),
+[vLLM Gemma4 recipe](https://docs.vllm.ai/projects/recipes/en/latest/Google/Gemma4.html),
+[SGLang Gemma4 recipe](https://github.com/sgl-project/sglang/blob/a4bef204c51e1c1b7ed59593b85993a940367591/docs/cookbook/autoregressive/Google/Gemma4.mdx),
+[PyNvVideoCodec device-memory API](https://docs.nvidia.com/video-technologies/pynvvideocodec/pynvc-api-prog-guide/using_pynvvideocodec_apis.html)
+and [DeepStream inference-server interface](https://docs.nvidia.com/deepstream/text/DS_plugin_gst-nvinferserver.html)
+provide concrete implementation paths. Their availability does not establish
+performance or a continuously mutable model context on this installation.
 
 ## Extending the pattern
 
